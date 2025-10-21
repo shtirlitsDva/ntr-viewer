@@ -1,29 +1,36 @@
 {
-  "name": "ntr-viewer",
-  "version": "0.1.0",
+  "name": "tauri-app",
   "private": true,
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "tauri dev",
-    "build": "tauri build",
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
     "check": "tsc --noEmit",
-    "lint": "eslint \"app/**/*.ts\" \"app/**/*.tsx\"",
-    "format": "biome format --write",
-    "preview": "vite preview"
+    "lint": "eslint .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
-    "@tauri-apps/api": "^1.5.3",
-    "babylonjs": "^7.2.0",
-    "babylonjs-loaders": "^7.2.0"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.2.3",
-    "@tauri-apps/cli": "^1.6.3",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "@vitejs/plugin-legacy": "^5.4.0",
-    "eslint": "^8.57.0",
-    "typescript": "^5.4.5",
-    "vite": "^5.2.0"
+    "@eslint/js": "^9.12.0",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^22.7.5",
+    "@vitest/ui": "^2.1.4",
+    "eslint": "^9.12.0",
+    "jsdom": "^27.0.1",
+    "typescript": "~5.6.2",
+    "typescript-eslint": "^8.12.2",
+    "vite": "^6.0.3",
+    "vitest": "^2.1.4"
   }
 }

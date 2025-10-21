@@ -7,24 +7,19 @@
 - **Primary References**: `InterfaceNeutral_e_01.01.md` (spec), `Example.ntr` (sample input)
 
 ## Tech Stack & Tooling
-- **Frontend**: Tauri + Vite + TypeScript (strict, `noUncheckedIndexedAccess`), Babylon.js for rendering.
-- **Backend (Tauri)**: Rust stable (`rust-toolchain.toml`).
-- **Formatting / Linting**: Biome (`biome.json`), ESLint (`@typescript-eslint`).
-- **Testing**: Vitest planned (`/tests` folder reserved) — currently absent.
-- **Node**: v18+ with `package-lock.json` committed for deterministic builds.
-- **Key Scripts** (`package.json`): `dev` (tauri dev), `build` (tauri build), `check` (tsc --noEmit), `lint`, `format`, `preview`.
+- **Frontend**: Vite 6 + TypeScript 5.6 (strict bundle mode) with vanilla DOM entry in `src/main.ts`; styles live in `src/styles.css`.
+- **Runtime Bridge**: Tauri 2.9 (`@tauri-apps/api` 2.9) with the default Tauri global enabled for desktop targets.
+- **Backend (Rust)**: Rust edition 2021 with `tauri` 2.x, `tauri-plugin-opener` 2.x, and serde for JSON-friendly commands (`src-tauri/Cargo.toml`).
+- **Tooling**: `npm` workflows (`npm run dev`, `npm run tauri dev`, `npm run build`), Vite dev server on port 1420, and Tauri CLI 2.9 for build/bundle tasks.
+- **Configuration**: `tsconfig.json` enforces `strict` mode; `src-tauri/tauri.conf.json` uses the Tauri 2 schema with capability-based permissions (`src-tauri/capabilities/default.json`).
 
 ## Architectural Layout
-- `app/main.ts` bootstraps UI via `bootstrapApp`.
-- `app/ui/` contains Vanilla DOM UI scaffolding (`app-bootstrap.ts`, `styles.css`) implementing toolbar, drag/drop, keyboard shortcuts, side panels, issue reporting.
-- `app/ntr/`:
-  - `model.ts`: Strongly typed domain models for NTR metadata, components, issues.
-  - `parser.ts`: Line-oriented parser with nominal-diameter registry, issue tracking, deterministic error handling.
-  - `result.ts`: Minimal `Result` helper utilities (`ok`, `err`, `map`, `flatMap`).
-- `app/geo/builders.ts`: Babylon mesh builders for straight pipes, reducers, bends (Bezier sweep), and tees.
-- `app/render/viewer.ts`: Babylon scene orchestration (ArcRotateCamera turntable, grid, highlighting, coloring modes, selection propagation).
-- `src-tauri/src/main.rs`: Minimal Tauri bootstrap placeholder.
-- Planned directories per brief (present but mostly empty): `/tests` (missing), `app/assets/samples/` (contains sample `.ntr` files).
+- `src/main.ts`: bootstrap script wiring DOM events to the `greet` Tauri command via `@tauri-apps/api/core.invoke`.
+- `src/styles.css`, `src/assets/`: baseline UI styling and static assets used by the starter view.
+- `src-tauri/src/lib.rs`: defines the Rust command surface (`greet`) and registers plugins before launching the app; `src-tauri/src/main.rs` delegates to this library entrypoint.
+- `src-tauri/Cargo.toml`, `build.rs`: Rust workspace configuration and Tauri build script hook.
+- `src-tauri/capabilities/default.json`: declares the desktop capability set (core + opener permissions) consumed by `tauri.conf.json`.
+- `src-tauri/icons/`: cross-platform application icons referenced by the bundle metadata in `tauri.conf.json`.
 
 ## Product Principles & Constraints
 1. Ship smallest working viewer first; guard against scope creep.
@@ -45,7 +40,7 @@
 - Memory ≤1.5 GB.
 
 ### Accessibility & UX
-- Keyboard: Orbit/pan/zoom reset (R), fit-to-view (F), toggle grid (G).
+- Keyboard: Orbit/pan/zoom reset (R), fit-to-view (F).
 - High-contrast theme option (not yet implemented).
 - Error panel lists invalid tokens with line numbers.
 
@@ -53,18 +48,64 @@
 - SemVer, CI via GitHub Actions; Tauri bundler for installers.
 - Commits follow Conventional Commits; PRs require green CI.
 
-## Current Observations (2024-XX repo snapshot)
-- Parser supports GEN/AUFT/DN/RO/RED/BOG/TEE records with issue aggregation; unknown records downgraded to warnings.
-- Viewer wiring present: selection highlight, color modes (`type`, `material`, `loadCase`, `group`, `diameter`), grid toggle, fit/reset, drag/drop, toolbar.
-- Geometry builders generate Babylon tubes/cones; reducers use `radiusFunction`, bends use quadratic Bezier path.
-- Issue/sum/selection panels display metadata and component details.
-- No tests yet, no high-contrast theme, telemetry placeholder, and `/tests` directory missing.
-- `src-tauri` side currently stub-only; file read via Tauri FS API in UI.
+## Implementation Plan
+1. **Foundation & Tooling**
+   - Restructure `src/` into feature folders (`src/app`, `src/ntr`, `src/viewer`) and configure path aliases via Vite + TS.
+   - Add linting (ESLint + `@typescript-eslint`) and formatting (Biome or Prettier) scripts; install Vitest + `@vitest/ui`.
+   - Update `package.json` scripts (`lint`, `format`, `test`, `check`, `tauri:dev`, `tauri:build`).
+   - Verification: `npm run lint && npm run test && npm run tauri dev` (confirm starter view loads).
 
-## Backlog / Follow-Ups
-1. Implement Vitest suites for parser and geometry to satisfy fast-feedback principle.
-2. Integrate Babylon scene smoke-test or snapshot harness.
-3. Add unified error toast/panel styling (per principle 7).
-4. Flesh out Tauri commands for file dialogs/telemetry toggle as future work.
-5. Implement high-contrast theme toggle and persist state.
+2. **Shared Utilities & Types**
+   - Create `src/shared/result.ts` (`Result` helpers), `src/shared/iter.ts` (line iterator utilities), and basic logging/toast abstractions.
+   - Define strict TypeScript types for physical units, identifiers, and enumerations referenced by RO/BOG/TEE/ARM/PROF/RED records.
+   - Verification: Vitest unit tests for utility helpers (`npm run test`).
 
+3. **NTR Schema Modeling**
+   - Establish `src/ntr/model.ts` with domain entities: `NtrFile`, `RunMetadata`, component interfaces for RO/BOG/TEE/ARM/PROF/RED, and issue structures (error vs warning).
+   - Add JSON schema-based validation helpers to guard parsed output (runtime `zod` or custom validators).
+   - Verification: Type-level checks pass (`npm run check`) and model tests run green (`npm run test`).
+
+4. **Lexer & Core Parser Scaffolding**
+   - Implement a resilient line reader that trims comments, normalizes whitespace, and produces token tuples with line numbers.
+   - Build a `parseRecord` dispatcher that routes tokens to record-specific handlers, accumulating issues instead of throwing.
+   - Verification: Vitest snapshot tests covering neutral happy-path lines and malformed tokens.
+
+5. **Record Parsers (Phase 1)**
+   - Implement RO (straight pipe), BOG (bend), RED (reducers), TEE (tee), ARM (valve), PROF (profile) parsers with strict numeric/unit validation and range checks.
+   - Cross-validate against `Example.ntr` and spec tables; accumulate issues for unsupported flags.
+   - Verification: targeted Vitest suites using fixture-driven tests (`tests/ntr/ro.spec.ts`, etc.).
+
+6. **Record Parsers (Phase 2)**
+   - Implement TEE, ARM, and PROF parsing including branch logic and profile metadata.
+   - Add composite tests ensuring mixed-record files parse deterministically and issues aggregate correctly.
+   - Verification: `npm run test` with scenario fixtures; manual dry run by parsing `/data/Example.ntr` via a temporary CLI (Node script).
+
+7. **File Loading Bridge**
+   - Add a Tauri command (`open_ntr_file`) that invokes the file dialog, reads file bytes via Rust, and returns contents (UTF-8) or structured errors.
+   - Ensure capability config (`capabilities/default.json`) grants `fs:read` and dialog permissions per Tauri 2 guidelines.
+   - Verification: Integration test using `@tauri-apps/api/core.invoke` in Vitest’s Tauri runner (or mocked harness), plus manual `npm run tauri dev`.
+
+8. **In-Memory Scene Graph**
+   - Translate parsed components into an intermediate scene representation (`src/viewer/sceneGraph.ts`) describing nodes, transforms, and materials.
+   - Encode shared defaults (pipe thickness, colors) and compute bounding boxes for fit-to-view.
+   - Verification: Unit tests for geometry metadata (e.g., reducer length calculations), `npm run test`.
+
+9. **Babylon.js Viewer Shell**
+   - Initialize Babylon engine within a React-less plain DOM canvas module (`src/viewer/viewer.ts`), wiring ArcRotateCamera, lights, and grid controls.
+   - Render primitive meshes for RO/BOG/RED/TEE/ARM/PROF using Babylon builders; implement selection highlight + color-by-type mode.
+   - Verification: Manual run (`npm run tauri dev`) inspecting sample file rendering; visual regression aids via screenshot capture script (optional).
+
+10. **UI Integration & Panels**
+    - Build toolbar (open file, reset view, color mode dropdown), metadata sidebar, and issues panel with DOM templates (`src/app/ui/*`).
+    - Hook keyboard shortcuts (F fit view, R reset, G grid toggle); display parser issues inline.
+    - Verification: Playwright or Tauri driver smoke test for key workflows; manual exploratory testing on all three OS targets.
+
+11. **Error Handling & Telemetry Placeholder**
+    - Centralize toast/error panel handling; surface all parser/runtime errors with actionable guidance.
+    - Implement opt-in telemetry toggle stub conforming to Product Principle #1 (no data sent yet).
+    - Verification: Unit tests for error pipeline and UI state; manual toggling during dev run.
+
+12. **Packaging & CI Hooks**
+    - Configure GitHub Actions (lint, test, `tauri build --ci`) and platform-specific bundle metadata.
+    - Document build/test workflow in `README.md`; prepare SemVer release checklist.
+    - Verification: Local dry run `npm run tauri build`; confirm artifacts in `src-tauri/target`.
