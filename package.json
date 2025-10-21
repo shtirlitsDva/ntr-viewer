@@ -1,0 +1,29 @@
+{
+  "name": "ntr-viewer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "check": "tsc --noEmit",
+    "lint": "eslint \"app/**/*.ts\" \"app/**/*.tsx\"",
+    "format": "biome format --write",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^1.5.3",
+    "babylonjs": "^7.2.0",
+    "babylonjs-loaders": "^7.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.5.11",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "@vitejs/plugin-legacy": "^5.4.0",
+    "@biomejs/biome": "^2.2.3",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.0"
+  }
+}

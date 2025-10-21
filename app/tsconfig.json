@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": false,
+    "importsNotUsedAsValues": "error",
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUncheckedIndexedAccess": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "preserve",
+    "types": [
+      "@tauri-apps/api"
+    ]
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx"
+  ],
+  "exclude": [
+    "./assets",
+    "./dist",
+    "./node_modules"
+  ]
+}

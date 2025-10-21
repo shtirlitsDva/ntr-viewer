@@ -1,0 +1,15 @@
+[package]
+name = "ntr-viewer"
+version = "0.1.0"
+description = "Local desktop viewer for ROHR2 NTR piping files"
+authors = ["NTR Viewer Team"]
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "1.5", features = ["shell-open"] }

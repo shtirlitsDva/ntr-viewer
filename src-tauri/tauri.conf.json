@@ -1,0 +1,31 @@
+{
+  "package": {
+    "productName": "NTR Viewer",
+    "version": "0.1.0"
+  },
+  "build": {
+    "beforeDevCommand": "vite dev",
+    "beforeBuildCommand": "vite build",
+    "devPath": "http://localhost:1420",
+    "distDir": "../dist"
+  },
+  "tauri": {
+    "bundle": {
+      "active": true,
+      "targets": "all",
+      "identifier": "com.example.ntrviewer"
+    },
+    "windows": [
+      {
+        "title": "NTR Viewer",
+        "width": 1280,
+        "height": 720,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "capabilities": [],
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self';"
+    }
+  }
+}
