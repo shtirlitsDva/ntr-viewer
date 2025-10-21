@@ -49,7 +49,7 @@ const buildStraight = (
   }
 
   const radius = component.nominal.outsideDiameter / 2;
-  if (radius <= 0) {
+  if (!(radius > 0)) {
     return [];
   }
 
@@ -65,7 +65,6 @@ const buildStraight = (
   );
 
   mesh.isPickable = true;
-
   return [mesh];
 };
 
@@ -80,15 +79,17 @@ const buildReducer = (
 
   const startRadius = component.nominalStart.outsideDiameter / 2;
   const endRadius = component.nominalEnd.outsideDiameter / 2;
-  if (startRadius <= 0 || endRadius <= 0) {
+  if (!(startRadius > 0) || !(endRadius > 0)) {
     return [];
   }
 
+  const segments = Math.max(1, path.length - 1);
   const mesh = MeshBuilder.CreateTube(
     `reducer-${component.id}`,
     {
       path,
-      radiusFunction: (index) => (index === 0 ? startRadius : endRadius),
+      radiusFunction: (index) =>
+        startRadius + ((endRadius - startRadius) * index) / segments,
       tessellation: 24,
       cap: Mesh.CAP_ALL
     },
@@ -96,23 +97,23 @@ const buildReducer = (
   );
 
   mesh.isPickable = true;
-
   return [mesh];
 };
 
 const buildBend = (component: BendComponent, options: BuildOptions): ComponentMeshes => {
-  const start = toBabylon(component.start);
-  const mid = toBabylon(component.control);
-  const end = toBabylon(component.end);
-
-  const curve = Curve3.CreateQuadraticBezier(start, mid, end, 24);
+  const curve = Curve3.CreateQuadraticBezier(
+    toBabylon(component.start),
+    toBabylon(component.control),
+    toBabylon(component.end),
+    24
+  );
   const path = curve.getPoints();
   if (path.length < 2) {
     return [];
   }
 
   const radius = component.nominal.outsideDiameter / 2;
-  if (radius <= 0) {
+  if (!(radius > 0)) {
     return [];
   }
 
@@ -128,7 +129,6 @@ const buildBend = (component: BendComponent, options: BuildOptions): ComponentMe
   );
 
   mesh.isPickable = true;
-
   return [mesh];
 };
 
@@ -164,7 +164,7 @@ const createTubeFromPath = (
   radius: number,
   scene: Scene
 ): AbstractMesh | null => {
-  if (path.length < 2 || radius <= 0) {
+  if (path.length < 2 || !(radius > 0)) {
     return null;
   }
 
