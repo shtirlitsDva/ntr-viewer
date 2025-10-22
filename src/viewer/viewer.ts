@@ -1,5 +1,4 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import type { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
 import { PointerEventTypes, PointerInfo } from "@babylonjs/core/Events/pointerEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -11,6 +10,8 @@ import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
+
+import { RevitStylePointerInput } from "./RevitStylePointerInput.ts";
 
 import type { ResolvedPoint, SceneElement, SceneGraph } from "@viewer/sceneGraph";
 
@@ -80,16 +81,8 @@ export class Viewer {
     this.camera.wheelDeltaPercentage = 0.01;
     this.camera.panningSensibility = 50;
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
-    const pointerInput = this.camera.inputs.attached.pointers as
-      | ArcRotateCameraPointersInput
-      | undefined;
-    if (pointerInput) {
-      pointerInput.buttons = [1];
-      (pointerInput as unknown as { panningMouseButton?: number }).panningMouseButton = 0;
-      pointerInput.angularSensibilityX = 1000;
-      pointerInput.angularSensibilityY = 1000;
-      (pointerInput as unknown as { panningSensibility?: number }).panningSensibility = 50;
-    }
+    this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
+    this.camera.inputs.add(new RevitStylePointerInput());
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
     light.intensity = 0.9;
