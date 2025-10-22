@@ -90,6 +90,7 @@ const parseRecord = (record: RawRecord): Result<Element, ParseIssue> => {
           record.code,
           record.lineNumber,
           `Unsupported record code "${record.code}"`,
+          "warning",
         ),
       );
   }
@@ -445,8 +446,13 @@ const optionalString = (map: FieldMap, key: string): string | undefined => {
   return field ? asString(field.value) : undefined;
 };
 
-const createIssue = (code: string, lineNumber: number, message: string): ParseIssue => ({
-  severity: "error",
+const createIssue = (
+  code: string,
+  lineNumber: number,
+  message: string,
+  severity: ParseIssue["severity"] = "error",
+): ParseIssue => ({
+  severity,
   message,
   recordCode: code,
   lineNumber,

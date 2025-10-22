@@ -1,22 +1,421 @@
-import { invoke } from "@tauri-apps/api/core";
+import { openNtrFile } from "@app/api/files";
+import { initializeTelemetry, recordTelemetry, setTelemetryEnabled } from "@app/telemetry";
+import { parseNtr } from "@ntr/parser";
+import type { ParseIssue } from "@ntr/model";
+import {
+  buildSceneGraph,
+  type ResolvedPoint,
+  type SceneElement,
+  type SceneGraph,
+} from "@viewer/sceneGraph";
+import { Viewer, type ColorMode } from "@viewer/viewer";
+import { isOk } from "@shared/result";
+import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
 
-let greetInputEl: HTMLInputElement | null;
-let greetMsgEl: HTMLElement | null;
-
-async function greet() {
-  if (greetMsgEl && greetInputEl) {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsgEl.textContent = await invoke("greet", {
-      name: greetInputEl.value,
-    });
-  }
+interface AppState {
+  filePath: string | null;
+  issues: ParseIssue[];
+  graph: SceneGraph | null;
 }
 
-window.addEventListener("DOMContentLoaded", () => {
-  greetInputEl = document.querySelector("#greet-input");
-  greetMsgEl = document.querySelector("#greet-msg");
-  document.querySelector("#greet-form")?.addEventListener("submit", (e) => {
-    e.preventDefault();
-    void greet();
+let viewer: Viewer | null = null;
+let state: AppState = {
+  filePath: null,
+  issues: [],
+  graph: null,
+};
+
+let selectionContainer: HTMLElement;
+let issuesList: HTMLUListElement;
+let filePathLabel: HTMLElement;
+let gridToggle: HTMLInputElement;
+let telemetryToggle: HTMLInputElement;
+let toastContainer: HTMLElement;
+
+const activeToasts = new Map<string, HTMLElement>();
+
+const getCanvas = (): HTMLCanvasElement => {
+  const canvas = document.querySelector<HTMLCanvasElement>("#viewer-canvas");
+  if (!canvas) {
+    throw new Error("Viewer canvas not found");
+  }
+  return canvas;
+};
+
+const initialize = () => {
+  selectionContainer = queryElement<HTMLElement>('[data-panel="selection"]');
+  issuesList = queryElement<HTMLUListElement>('[data-panel="issues"]');
+  filePathLabel = queryElement<HTMLElement>('[data-state="file-path"]');
+  gridToggle = queryElement<HTMLInputElement>('[data-control="grid-toggle"]');
+  telemetryToggle = queryElement<HTMLInputElement>('[data-control="telemetry-toggle"]');
+  toastContainer = queryElement<HTMLElement>('[data-state="toasts"]');
+
+  viewer = new Viewer(getCanvas());
+  viewer.onSelectionChanged(handleSelectionChange);
+  viewer.setGridVisible(gridToggle.checked);
+
+  setupToolbar();
+  setupKeyboardShortcuts();
+  setupToasts();
+  initializeTelemetryPreferences();
+  renderFilePath(null);
+  renderSelection(null);
+  renderIssues([]);
+};
+
+const queryElement = <T extends Element>(selector: string): T => {
+  const element = document.querySelector<T>(selector);
+  if (!element) {
+    throw new Error(`Missing element for selector: ${selector}`);
+  }
+  return element;
+};
+
+const setupToolbar = () => {
+  queryElement<HTMLButtonElement>('[data-action="open-file"]').addEventListener("click", () => {
+    void handleOpenFile();
   });
+
+  queryElement<HTMLButtonElement>('[data-action="fit-view"]').addEventListener("click", () => {
+    fitToCurrentBounds();
+  });
+
+  queryElement<HTMLButtonElement>('[data-action="reset-view"]').addEventListener("click", () => {
+    viewer?.setSelection(null);
+    fitToCurrentBounds();
+  });
+
+  queryElement<HTMLSelectElement>('[data-control="color-mode"]').addEventListener(
+    "change",
+    (event) => {
+      const select = event.target as HTMLSelectElement;
+      viewer?.setColorMode(select.value as ColorMode);
+    },
+  );
+
+  gridToggle.addEventListener("change", () => {
+    viewer?.setGridVisible(gridToggle.checked);
+  });
+
+  telemetryToggle.addEventListener("change", () => {
+    setTelemetryEnabled(telemetryToggle.checked);
+    publishToast(
+      createToast(
+        "info",
+        telemetryToggle.checked
+          ? "Telemetry enabled"
+          : "Telemetry disabled",
+      ),
+    );
+  });
+};
+
+const setupKeyboardShortcuts = () => {
+  window.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target && (target.tagName === "INPUT" || target.tagName === "SELECT")) {
+      return;
+    }
+
+    switch (event.key.toLowerCase()) {
+      case "f":
+        fitToCurrentBounds();
+        event.preventDefault();
+        break;
+      case "r":
+        viewer?.setSelection(null);
+        fitToCurrentBounds();
+        event.preventDefault();
+        break;
+      case "g":
+        gridToggle.checked = !gridToggle.checked;
+        viewer?.setGridVisible(gridToggle.checked);
+        event.preventDefault();
+        break;
+      default:
+        break;
+    }
+  });
+};
+
+const setupToasts = () => {
+  subscribeToToasts((toast) => {
+    const element = document.createElement("div");
+    element.className = `toast toast-${toast.level}`;
+
+    const message = document.createElement("p");
+    message.className = "toast-message";
+    message.textContent = toast.message;
+    element.append(message);
+
+    if (toast.detail) {
+      const detail = document.createElement("p");
+      detail.className = "toast-detail";
+      detail.textContent = toast.detail;
+      element.append(detail);
+    }
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.setAttribute("aria-label", "Dismiss notification");
+    closeButton.textContent = "×";
+    closeButton.addEventListener("click", () => dismissToast(toast.id));
+    element.append(closeButton);
+
+    toastContainer.append(element);
+    activeToasts.set(toast.id, element);
+
+    window.setTimeout(() => dismissToast(toast.id), 5000);
+  });
+};
+
+const dismissToast = (id: string) => {
+  const element = activeToasts.get(id);
+  if (!element) {
+    return;
+  }
+  element.classList.add("toast-closing");
+  window.setTimeout(() => {
+    element.remove();
+    activeToasts.delete(id);
+  }, 150);
+};
+
+const initializeTelemetryPreferences = () => {
+  const enabled = initializeTelemetry();
+  telemetryToggle.checked = enabled;
+};
+
+const handleOpenFile = async () => {
+  const result = await openNtrFile();
+  if (result.status === "cancelled") {
+    return;
+  }
+
+  try {
+    const parseResult = parseNtr(result.path, result.contents);
+
+    if (!isOk(parseResult)) {
+      state = {
+        filePath: result.path,
+        graph: null,
+        issues: [...parseResult.error],
+      };
+      viewer?.load({ elements: [], bounds: null });
+      viewer?.setSelection(null);
+      renderFilePath(result.path);
+      renderSelection(null);
+      renderIssues(state.issues);
+      publishToast(
+        createToast(
+          "error",
+          "Failed to load NTR file",
+          parseResult.error[0]?.message ?? "Unexpected parser error",
+        ),
+      );
+      recordTelemetry("file_open_failed", {
+        issueCount: state.issues.length,
+      });
+      return;
+    }
+
+    const graph = buildSceneGraph(parseResult.value.file);
+    state = {
+      filePath: result.path,
+      graph,
+      issues: [...parseResult.value.issues],
+    };
+
+    viewer?.load(graph);
+    viewer?.setSelection(null);
+    renderFilePath(result.path);
+    renderSelection(null);
+    renderIssues(state.issues);
+
+    const warningCount = state.issues.filter((issue) => issue.severity === "warning").length;
+    const fileName = getFileName(result.path);
+    publishToast(
+      createToast(
+        warningCount > 0 ? "warning" : "success",
+        warningCount > 0 ? `Loaded ${fileName} with warnings` : `Loaded ${fileName}`,
+        warningCount > 0 ? `${warningCount} warnings detected` : undefined,
+      ),
+    );
+
+    recordTelemetry("file_opened", {
+      elementCount: graph.elements.length,
+      warnings: warningCount,
+    });
+  } catch (error) {
+    console.error(error);
+    publishToast(createToast("error", "Unexpected error while opening file"));
+  }
+};
+
+const handleSelectionChange = (elementId: string | null) => {
+  if (!state.graph) {
+    renderSelection(null);
+    return;
+  }
+
+  const element = state.graph.elements.find((item) => item.id === elementId) ?? null;
+  renderSelection(element);
+};
+
+const renderFilePath = (path: string | null) => {
+  if (!path) {
+    filePathLabel.textContent = "";
+    filePathLabel.title = "";
+    return;
+  }
+  filePathLabel.textContent = getFileName(path);
+  filePathLabel.title = path;
+};
+
+const renderSelection = (element: SceneElement | null) => {
+  selectionContainer.innerHTML = "";
+
+  if (!state.graph || state.graph.elements.length === 0) {
+    selectionContainer.append(createEmptyState("Open an NTR file to begin."));
+    return;
+  }
+
+  if (!element) {
+    selectionContainer.append(
+      createEmptyState("Click one of the rendered elements to inspect its details."),
+    );
+    return;
+  }
+
+  const list = document.createElement("dl");
+  list.className = "detail-list";
+
+  appendDetail(list, "Type", element.kind);
+  appendDetail(list, "Material", element.material ?? "—");
+  appendDetail(list, "Pipeline", element.pipeline ?? "—");
+  appendDetail(list, "Load Cases", element.loadCases.length ? element.loadCases.join(", ") : "—");
+
+  switch (element.kind) {
+    case "RO":
+      appendDetail(list, "Nominal Diameter", element.nominalDiameter);
+      appendDetail(list, "Start", formatPoint(element.start));
+      appendDetail(list, "End", formatPoint(element.end));
+      break;
+    case "PROF":
+      appendDetail(list, "Profile", element.profileType);
+      appendDetail(list, "Start", formatPoint(element.start));
+      appendDetail(list, "End", formatPoint(element.end));
+      if (element.axis) {
+        appendDetail(list, "Axis", element.axis);
+      }
+      if (element.axisDirection) {
+        appendDetail(list, "Axis Direction", formatPoint(element.axisDirection));
+      }
+      break;
+    case "BOG":
+      appendDetail(list, "Nominal Diameter", element.nominalDiameter);
+      appendDetail(list, "Start", formatPoint(element.start));
+      appendDetail(list, "Tangent", formatPoint(element.tangent));
+      appendDetail(list, "End", formatPoint(element.end));
+      break;
+    case "TEE":
+      appendDetail(list, "Main Diameter", element.mainNominalDiameter);
+      appendDetail(list, "Branch Diameter", element.branchNominalDiameter);
+      appendDetail(list, "Main Start", formatPoint(element.mainStart));
+      appendDetail(list, "Main End", formatPoint(element.mainEnd));
+      appendDetail(list, "Branch Start", formatPoint(element.branchStart));
+      appendDetail(list, "Branch End", formatPoint(element.branchEnd));
+      break;
+    case "ARM":
+      appendDetail(list, "Inlet Diameter", element.inletDiameter);
+      appendDetail(list, "Outlet Diameter", element.outletDiameter);
+      appendDetail(list, "Start", formatPoint(element.start));
+      appendDetail(list, "End", formatPoint(element.end));
+      appendDetail(list, "Center", formatPoint(element.center));
+      if (element.weight !== undefined) {
+        appendDetail(list, "Weight", `${element.weight.toFixed(2)} kg`);
+      }
+      break;
+    case "RED":
+      appendDetail(list, "Inlet Diameter", element.inletDiameter);
+      appendDetail(list, "Outlet Diameter", element.outletDiameter);
+      appendDetail(list, "Start", formatPoint(element.start));
+      appendDetail(list, "End", formatPoint(element.end));
+      break;
+    default:
+      break;
+  }
+
+  selectionContainer.append(list);
+};
+
+const appendDetail = (list: HTMLDListElement, label: string, value: string) => {
+  const term = document.createElement("dt");
+  term.className = "detail-label";
+  term.textContent = label;
+
+  const description = document.createElement("dd");
+  description.textContent = value;
+
+  list.append(term, description);
+};
+
+const formatPoint = (point: ResolvedPoint | null | undefined): string => {
+  if (!point) {
+    return "—";
+  }
+  if (point.kind === "coordinate") {
+    return `(${formatNumber(point.position.x)}, ${formatNumber(point.position.y)}, ${formatNumber(point.position.z)})`;
+  }
+  return `Node ${point.reference}`;
+};
+
+const formatNumber = (value: number): string => value.toFixed(2);
+
+const getFileName = (path: string): string => {
+  const segments = path.split(/[/\\]/);
+  return segments.at(-1) ?? path;
+};
+
+const renderIssues = (issues: ParseIssue[]) => {
+  issuesList.innerHTML = "";
+  if (issues.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty-state";
+    empty.textContent = "No issues reported.";
+    issuesList.append(empty);
+    return;
+  }
+
+  issues.forEach((issue) => {
+    const item = document.createElement("li");
+    item.className = `issue-item ${issue.severity}`;
+
+    const meta = document.createElement("div");
+    meta.className = "issue-meta";
+    meta.textContent = `${issue.severity.toUpperCase()} · ${issue.recordCode} · line ${issue.lineNumber}`;
+
+    const message = document.createElement("div");
+    message.className = "issue-message";
+    message.textContent = issue.message;
+
+    item.append(meta, message);
+    issuesList.append(item);
+  });
+};
+
+const createEmptyState = (text: string): HTMLElement => {
+  const el = document.createElement("p");
+  el.className = "empty-state";
+  el.textContent = text;
+  return el;
+};
+
+const fitToCurrentBounds = () => {
+  const bounds = state.graph?.bounds ?? null;
+  viewer?.fitToBounds(bounds);
+};
+
+window.addEventListener("DOMContentLoaded", () => {
+  initialize();
 });

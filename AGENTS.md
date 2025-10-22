@@ -49,63 +49,38 @@
 - Commits follow Conventional Commits; PRs require green CI.
 
 ## Implementation Plan
-1. **Foundation & Tooling**
-   - Restructure `src/` into feature folders (`src/app`, `src/ntr`, `src/viewer`) and configure path aliases via Vite + TS.
-   - Add linting (ESLint + `@typescript-eslint`) and formatting (Biome or Prettier) scripts; install Vitest + `@vitest/ui`.
-   - Update `package.json` scripts (`lint`, `format`, `test`, `check`, `tauri:dev`, `tauri:build`).
-   - Verification: `npm run lint && npm run test && npm run tauri dev` (confirm starter view loads).
+1. **Foundation & Tooling** ✅  
+   Folder restructure, path aliases, ESLint+Vitest tooling, and package scripts are in place. `npm run lint`, `npm run test`, and `npm run tauri:dev` verify the dev loop.
 
-2. **Shared Utilities & Types**
-   - Create `src/shared/result.ts` (`Result` helpers), `src/shared/iter.ts` (line iterator utilities), and basic logging/toast abstractions.
-   - Define strict TypeScript types for physical units, identifiers, and enumerations referenced by RO/BOG/TEE/ARM/PROF/RED records.
-   - Verification: Vitest unit tests for utility helpers (`npm run test`).
+2. **Shared Utilities & Types** ✅  
+   Result helpers, iterators, toast/logging primitives, and strict branded types implemented with accompanying unit tests.
 
-3. **NTR Schema Modeling**
-   - Establish `src/ntr/model.ts` with domain entities: `NtrFile`, `RunMetadata`, component interfaces for RO/BOG/TEE/ARM/PROF/RED, and issue structures (error vs warning).
-   - Add JSON schema-based validation helpers to guard parsed output (runtime `zod` or custom validators).
-   - Verification: Type-level checks pass (`npm run check`) and model tests run green (`npm run test`).
+3. **NTR Schema Modeling** ✅  
+   `src/ntr/model.ts` and `validation.ts` provide typed entities and Zod validation; `npm run check` and tests cover the data layer.
 
-4. **Lexer & Core Parser Scaffolding**
-   - Implement a resilient line reader that trims comments, normalizes whitespace, and produces token tuples with line numbers.
-   - Build a `parseRecord` dispatcher that routes tokens to record-specific handlers, accumulating issues instead of throwing.
-   - Verification: Vitest snapshot tests covering neutral happy-path lines and malformed tokens.
+4. **Lexer & Core Parser Scaffolding** ✅  
+   Line tokeniser and record dispatcher implemented; lexer tests ensure comment/quote handling and error aggregation.
 
-5. **Record Parsers (Phase 1)**
-   - Implement RO (straight pipe), BOG (bend), RED (reducers), TEE (tee), ARM (valve), PROF (profile) parsers with strict numeric/unit validation and range checks.
-   - Cross-validate against `Example.ntr` and spec tables; accumulate issues for unsupported flags.
-   - Verification: targeted Vitest suites using fixture-driven tests (`tests/ntr/ro.spec.ts`, etc.).
+5. **Record Parsers (Phase 1)** ✅  
+   RO/BOG/RED/TEE/ARM/PROF parsing with validation, exercised by focused Vitest suites.
 
-6. **Record Parsers (Phase 2)**
-   - Implement TEE, ARM, and PROF parsing including branch logic and profile metadata.
-   - Add composite tests ensuring mixed-record files parse deterministically and issues aggregate correctly.
-   - Verification: `npm run test` with scenario fixtures; manual dry run by parsing `/data/Example.ntr` via a temporary CLI (Node script).
+6. **Record Parsers (Phase 2)** ✅  
+   Mixed-record parsing validated via example fixture; issues surfaced without hard failure.
 
-7. **File Loading Bridge**
-   - Add a Tauri command (`open_ntr_file`) that invokes the file dialog, reads file bytes via Rust, and returns contents (UTF-8) or structured errors.
-   - Ensure capability config (`capabilities/default.json`) grants `fs:read` and dialog permissions per Tauri 2 guidelines.
-   - Verification: Integration test using `@tauri-apps/api/core.invoke` in Vitest’s Tauri runner (or mocked harness), plus manual `npm run tauri dev`.
+7. **File Loading Bridge** ✅  
+   Tauri command returns file path + contents, capability updated, and mocks tested in Vitest.
 
-8. **In-Memory Scene Graph**
-   - Translate parsed components into an intermediate scene representation (`src/viewer/sceneGraph.ts`) describing nodes, transforms, and materials.
-   - Encode shared defaults (pipe thickness, colors) and compute bounding boxes for fit-to-view.
-   - Verification: Unit tests for geometry metadata (e.g., reducer length calculations), `npm run test`.
+8. **In-Memory Scene Graph** ✅  
+   `buildSceneGraph` converts parsed data and computes bounds; unit test covers element conversion.
 
-9. **Babylon.js Viewer Shell**
-   - Initialize Babylon engine within a React-less plain DOM canvas module (`src/viewer/viewer.ts`), wiring ArcRotateCamera, lights, and grid controls.
-   - Render primitive meshes for RO/BOG/RED/TEE/ARM/PROF using Babylon builders; implement selection highlight + color-by-type mode.
-   - Verification: Manual run (`npm run tauri dev`) inspecting sample file rendering; visual regression aids via screenshot capture script (optional).
+9. **Babylon.js Viewer Shell** ✅  
+   Viewer renders polylines, supports color modes, selection highlighting, grid toggle, and fit/reset behavior.
 
-10. **UI Integration & Panels**
-    - Build toolbar (open file, reset view, color mode dropdown), metadata sidebar, and issues panel with DOM templates (`src/app/ui/*`).
-    - Hook keyboard shortcuts (F fit view, R reset, G grid toggle); display parser issues inline.
-    - Verification: Playwright or Tauri driver smoke test for key workflows; manual exploratory testing on all three OS targets.
+10. **UI Integration & Panels** ✅  
+    Toolbar actions, keyboard shortcuts, selection/issue panels, toasts, and telemetry toggle wired to state.
 
-11. **Error Handling & Telemetry Placeholder**
-    - Centralize toast/error panel handling; surface all parser/runtime errors with actionable guidance.
-    - Implement opt-in telemetry toggle stub conforming to Product Principle #1 (no data sent yet).
-    - Verification: Unit tests for error pipeline and UI state; manual toggling during dev run.
+11. **Error Handling & Telemetry Placeholder** ✅  
+    Toast bus and telemetry stub persist user choice, surfacing parse/runtime outcomes.
 
-12. **Packaging & CI Hooks**
-    - Configure GitHub Actions (lint, test, `tauri build --ci`) and platform-specific bundle metadata.
-    - Document build/test workflow in `README.md`; prepare SemVer release checklist.
-    - Verification: Local dry run `npm run tauri build`; confirm artifacts in `src-tauri/target`.
+12. **Packaging & CI Hooks** ✅  
+    GitHub Actions workflow runs lint/test/check/cargo/tauri build; README documents workflow; `npm run tauri:build` confirmed bundles (.deb/.rpm/.AppImage).

@@ -1,0 +1,118 @@
+import { describe, expect, it } from "vitest";
+
+import type { Arm, NtrFile, Reducer, StraightPipe, Tee } from "@ntr/model";
+import { buildSceneGraph } from "@viewer/sceneGraph";
+import {
+  asIdentifier,
+  asKilograms,
+  asNominalDiameterCode,
+  createCoordinatePoint,
+  createNamedPoint,
+} from "@ntr/types";
+
+const coordinate = (x: number, y: number, z: number) => (
+  createCoordinatePoint({ x, y, z })
+);
+
+describe("buildSceneGraph", () => {
+  it("produces scene elements with resolved coordinates and bounds", () => {
+    const straight: StraightPipe = {
+      kind: "RO",
+      start: coordinate(0, 0, 0),
+      end: coordinate(5, 0, 0),
+      nominalDiameter: asNominalDiameterCode("DN150"),
+      loadCases: [],
+      material: undefined,
+      description: undefined,
+      reference: undefined,
+      pipeline: undefined,
+      componentTag: undefined,
+      norm: undefined,
+      series: undefined,
+      schedule: undefined,
+    };
+
+    const tee: Tee = {
+      kind: "TEE",
+      mainStart: coordinate(5, 0, 0),
+      mainEnd: coordinate(5, 4, 0),
+      branchStart: coordinate(5, 2, 0),
+      branchEnd: coordinate(5, 2, 3),
+      mainNominalDiameter: asNominalDiameterCode("DN200"),
+      branchNominalDiameter: asNominalDiameterCode("DN100"),
+      teeType: "H",
+      loadCases: [],
+      material: undefined,
+      description: undefined,
+      reference: undefined,
+      pipeline: undefined,
+      componentTag: undefined,
+      norm: undefined,
+      series: undefined,
+      schedule: undefined,
+    };
+
+    const valve: Arm = {
+      kind: "ARM",
+      start: coordinate(2, 0, 0),
+      end: coordinate(2, 1, 0),
+      center: coordinate(2, 0.5, 0),
+      inletDiameter: asNominalDiameterCode("DN80"),
+      outletDiameter: asNominalDiameterCode("DN80"),
+      weight: asKilograms(10),
+      loadCases: [],
+      material: undefined,
+      description: undefined,
+      reference: undefined,
+      pipeline: undefined,
+      componentTag: undefined,
+      norm: undefined,
+      series: undefined,
+      schedule: undefined,
+    };
+
+    const reducer: Reducer = {
+      kind: "RED",
+      start: coordinate(4, 4, 1),
+      end: createNamedPoint("NODE-1"),
+      inletDiameter: asNominalDiameterCode("DN200"),
+      outletDiameter: asNominalDiameterCode("DN150"),
+      loadCases: [],
+      material: undefined,
+      description: undefined,
+      reference: undefined,
+      pipeline: undefined,
+      componentTag: undefined,
+      norm: undefined,
+      series: undefined,
+      schedule: undefined,
+    };
+
+    const file: NtrFile = {
+      id: asIdentifier("scene-test"),
+      metadata: {},
+      elements: [straight, tee, valve, reducer],
+      issues: [],
+    };
+
+    const graph = buildSceneGraph(file);
+    expect(graph.elements).toHaveLength(4);
+
+    const [sceneStraight, sceneTee, sceneValve, sceneReducer] = graph.elements;
+
+    expect(sceneStraight.id).toBe("element-0");
+    if (sceneStraight.kind !== "RO") expect.fail("expected RO scene element");
+    expect(sceneStraight.start.kind).toBe("coordinate");
+    if (sceneReducer.kind !== "RED") expect.fail("expected RED scene element");
+    expect(sceneReducer.end.kind).toBe("unresolved");
+
+    expect(graph.bounds).toEqual({
+      min: { x: 0, y: 0, z: 0 },
+      max: { x: 5, y: 4, z: 3 },
+    });
+
+    expect(sceneTee.loadCases).toEqual([]);
+    if (sceneValve.kind !== "ARM") expect.fail("expected ARM scene element");
+    expect(sceneValve.weight).toBe(10);
+  });
+});
