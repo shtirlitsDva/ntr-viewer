@@ -1,7 +1,8 @@
 use encoding_rs::{Encoding, UTF_8, WINDOWS_1252};
-use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 
 #[derive(Default)]
@@ -10,11 +11,11 @@ struct WatcherState {
 }
 
 struct ActiveWatcher {
-    watcher: RecommendedWatcher,
-    path: PathBuf,
+    _watcher: RecommendedWatcher,
+    _path: PathBuf,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct FileChangePayload {
     path: String,
     kind: String,
@@ -100,7 +101,7 @@ fn start_file_watch(
         guard.take();
     }
 
-    let mut watcher = notify::recommended_watcher(move |res| {
+    let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         match res {
             Ok(event) => {
                 if should_emit_event(&event.kind) {
@@ -136,8 +137,8 @@ fn start_file_watch(
 
     let mut guard = state.inner.lock().expect("watcher state poisoned");
     *guard = Some(ActiveWatcher {
-        watcher,
-        path: canonical_path,
+        _watcher: watcher,
+        _path: canonical_path,
     });
     Ok(())
 }
