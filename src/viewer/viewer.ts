@@ -470,9 +470,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
         height: length,
         diameterBottom: bottom,
         diameterTop: top,
-        tessellation,
-        subdivisions: 1,
-        sideOrientation: Mesh.DOUBLESIDE,
+        // tessellation,
+        //subdivisions: 1,
+        // sideOrientation: Mesh.FRONTSIDE
       },
       this.scene,
     );
