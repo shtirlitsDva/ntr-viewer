@@ -77,8 +77,11 @@ fn read_ntr_file(path: &Path) -> Result<OpenFileResponse, String> {
     let bytes = std::fs::read(path)
         .map_err(|err| format!("Failed to read file bytes: {err}"))?;
     let contents = decode_ntr_bytes(&bytes)?;
+    let canonical = path
+        .canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf());
     Ok(OpenFileResponse {
-        path: normalize_path(path),
+        path: normalize_path(&canonical),
         contents,
     })
 }
@@ -202,12 +205,18 @@ fn format_event_kind(kind: &EventKind) -> String {
 
 fn paths_match(event_paths: &[PathBuf], target: &str) -> bool {
     if event_paths.is_empty() {
+        log_watch_event("Event without explicit path list; assuming match");
         return true;
     }
-    event_paths
-        .iter()
-        .map(|path| normalize_path(path))
-        .any(|candidate| candidate == target)
+    for path in event_paths {
+        let candidate = normalize_path(path);
+        log_watch_event(&format!("Comparing event path {} to target {}", candidate, target));
+        if candidate == target {
+            log_watch_event("Path match confirmed");
+            return true;
+        }
+    }
+    false
 }
 
 fn normalize_path(path: &Path) -> String {
