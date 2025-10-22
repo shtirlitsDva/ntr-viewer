@@ -115,10 +115,15 @@ describe("buildSceneGraph", () => {
     if (sceneReducer.kind !== "RED") expect.fail("expected RED scene element");
     expect(sceneReducer.end.kind).toBe("unresolved");
 
-    expect(graph.bounds).toEqual({
-      min: { x: 0, y: 0, z: 0 },
-      max: { x: 5, y: 4, z: 3 },
-    });
+    expect(graph.bounds).not.toBeNull();
+    if (!graph.bounds) {
+      expect.fail("expected bounds to be defined");
+      return;
+    }
+    expect(graph.bounds.min).toEqual({ x: 0, y: 0, z: -4 });
+    expect(graph.bounds.max.x).toBe(5);
+    expect(graph.bounds.max.y).toBe(3);
+    expect(graph.bounds.max.z).toBeCloseTo(0, 6);
 
     expect(sceneTee.loadCases).toEqual([]);
     if (sceneValve.kind !== "ARM") expect.fail("expected ARM scene element");

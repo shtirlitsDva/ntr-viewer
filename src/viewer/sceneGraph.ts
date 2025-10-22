@@ -24,13 +24,23 @@ import type {
   Vector3,
 } from "@ntr/types";
 
+const transformVector = (position: Vector3): Vector3 => ({
+  x: position.x,
+  y: position.z,
+  z: -position.y,
+});
+
 export interface BoundingBox {
   readonly min: Vector3;
   readonly max: Vector3;
 }
 
 export type ResolvedPoint =
-  | { readonly kind: "coordinate"; readonly position: Vector3 }
+  | {
+      readonly kind: "coordinate";
+      readonly position: Vector3;
+      readonly scenePosition: Vector3;
+    }
   | { readonly kind: "unresolved"; readonly reference: string };
 
 interface SceneElementCommon {
@@ -302,8 +312,9 @@ const convertReducer = (
 
 const resolvePoint = (point: PointReference, builder: BoundsBuilder): ResolvedPoint => {
   if (point.kind === "coordinate") {
-    builder.add(point.position);
-    return { kind: "coordinate", position: point.position };
+    const scenePosition = transformVector(point.position);
+    builder.add(scenePosition);
+    return { kind: "coordinate", position: point.position, scenePosition };
   }
   return { kind: "unresolved", reference: point.id };
 };
