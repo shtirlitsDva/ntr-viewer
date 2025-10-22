@@ -29,18 +29,10 @@ export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
 export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
-const DEFAULT_MIN_TUBE_TESSELLATION = 64;
-const DEFAULT_MAX_TUBE_TESSELLATION = 160;
 const MSAA_SAMPLES = 4;
 interface MeshMetadata {
   elementId?: string;
 }
-
-type TubeOptions = {
-  diameter?: number;
-  startDiameter?: number;
-  endDiameter?: number;
-};
 
 interface CylinderOptions {
   readonly diameter?: number;
@@ -48,22 +40,7 @@ interface CylinderOptions {
   readonly diameterBottom?: number;
 }
 
-interface InternalRendererOptions {
-  readonly minTessellation: number;
-  readonly maxTessellation: number;
-  readonly tessellationStrategy?: (input: TessellationStrategyInput) => number;
-}
-
-export interface TessellationStrategyInput {
-  readonly diameters: number[];
-  readonly cameraRadius: number;
-}
-
-export interface BabylonRendererOptions {
-  readonly minTessellation?: number;
-  readonly maxTessellation?: number;
-  readonly tessellationStrategy?: (input: TessellationStrategyInput) => number;
-}
+export interface BabylonRendererOptions {}
 
 export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -77,7 +54,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly elementBaseColor = new Map<string, Color3>();
   private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
-  private readonly options: InternalRendererOptions;
   private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
   private wheelHandler: ((event: WheelEvent) => void) | null = null;
@@ -86,19 +62,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private colorMode: ColorMode = "type";
   private gridVisible = true;
 
-  public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
+  public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
-    this.options = {
-      minTessellation: Math.max(
-        8,
-        options.minTessellation ?? DEFAULT_MIN_TUBE_TESSELLATION,
-      ),
-      maxTessellation: Math.max(
-        options.minTessellation ?? DEFAULT_MIN_TUBE_TESSELLATION,
-        options.maxTessellation ?? DEFAULT_MAX_TUBE_TESSELLATION,
-      ),
-      tessellationStrategy: options.tessellationStrategy,
-    };
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     this.scene = new Scene(this.engine);
 
@@ -455,12 +420,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const axis = delta.normalize();
     const center = startVec.add(delta.scale(0.5));
 
-    const tessellation = this.resolveTessellation({
-      diameter: options.diameter,
-      startDiameter: options.diameterBottom,
-      endDiameter: options.diameterTop,
-    });
-
     const bottom = Math.max(options.diameterBottom ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
     const top = Math.max(options.diameterTop ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
 
@@ -537,43 +496,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const color = colorFromHue(hash % 360);
     this.materialColorCache.set(material, color);
     return color.clone();
-  }
-
-  private resolveTessellation(options: TubeOptions): number {
-    const diameters = this.collectDiameters(options);
-    let target =
-      diameters.length > 0 ? Math.max(...diameters) : DEFAULT_PIPE_DIAMETER;
-
-    if (this.options.tessellationStrategy) {
-      const strategyValue = this.options.tessellationStrategy({
-        diameters,
-        cameraRadius: this.camera.radius,
-      });
-      if (Number.isFinite(strategyValue) && strategyValue > 0) {
-        target = strategyValue;
-      }
-    }
-
-    if (!Number.isFinite(target) || target <= 0) {
-      target = DEFAULT_PIPE_DIAMETER;
-    }
-
-    const rounded = Math.round(target);
-    return Math.max(
-      8,
-      Math.max(this.options.minTessellation, Math.min(this.options.maxTessellation, rounded)),
-    );
-  }
-
-  private collectDiameters(options: TubeOptions): number[] {
-    return [
-      options.diameter,
-      options.startDiameter,
-      options.endDiameter,
-    ].filter(
-      (value): value is number =>
-        typeof value === "number" && Number.isFinite(value) && value > 0,
-    );
   }
 
   private configureRenderingPipeline(): void {
