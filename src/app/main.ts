@@ -13,8 +13,9 @@ import {
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
-// import { createBabylonRenderer } from "@viewer/viewer";
-import { createImpostorRenderer } from "@viewer/renderers";
+//import { createBabylonRenderer } from "@viewer/viewer";
+//import { createImpostorRenderer } from "@viewer/renderers";
+import { createHighTessellationRenderer } from "@viewer/renderers"
 import type { ColorMode, SceneRenderer } from "@viewer/engine";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
@@ -124,8 +125,8 @@ const initialize = () => {
 
   // Swap renderer factories here for experimentation:
   // renderer = createBabylonRenderer(getCanvas());
-  // renderer = createHighTessellationRenderer(getCanvas());
-  renderer = createImpostorRenderer(getCanvas());
+  renderer = createHighTessellationRenderer(getCanvas());
+  // renderer = createImpostorRenderer(getCanvas());
   renderer.onSelectionChanged(handleSelectionChange);
   renderer.setGridVisible(gridToggle.checked);
 
