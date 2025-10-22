@@ -41,6 +41,7 @@ type TubeOptions = {
 };
 
 export class Viewer {
+  private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
   private readonly scene: Scene;
   private readonly camera: ArcRotateCamera;
@@ -52,12 +53,14 @@ export class Viewer {
   private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
   private resizeHandler: (() => void) | null = null;
+  private wheelHandler: ((event: WheelEvent) => void) | null = null;
   private currentGraph: SceneGraph | null = null;
   private selectedElement: string | null = null;
   private colorMode: ColorMode = "type";
   private gridVisible = true;
 
   public constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
     this.scene = new Scene(this.engine);
 
@@ -71,9 +74,16 @@ export class Viewer {
     );
     this.camera.attachControl(canvas, true);
     this.camera.lowerRadiusLimit = 0.1;
+    this.camera.minZ = 0.1;
+    this.camera.maxZ = 100_000;
+    this.camera.wheelDeltaPercentage = 0.01;
+    this.camera.panningSensibility = 1_000;
+    this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
     light.intensity = 0.9;
+
+    this.initializeMouseWheelZoom();
 
     this.ground = MeshBuilder.CreateGround(
       "grid",
@@ -115,6 +125,10 @@ export class Viewer {
     if (this.resizeHandler) {
       window.removeEventListener("resize", this.resizeHandler);
       this.resizeHandler = null;
+    }
+    if (this.wheelHandler) {
+      this.canvas.removeEventListener("wheel", this.wheelHandler);
+      this.wheelHandler = null;
     }
     this.scene.dispose();
     this.engine.dispose();
@@ -187,10 +201,12 @@ export class Viewer {
     const spanZ = bounds.max.z - bounds.min.z;
     const maxSpan = Math.max(spanX, spanY, spanZ, 1);
     const radius = maxSpan * 1.5;
+    const farPlane = Math.max(maxSpan * 20, 10_000);
 
     this.camera.target = center;
     this.camera.radius = radius;
-    this.camera.lowerRadiusLimit = radius * 0.05;
+    this.camera.lowerRadiusLimit = Math.max(radius * 0.05, 0.5);
+    this.camera.maxZ = Math.max(this.camera.maxZ, farPlane);
   }
 
   private notifySelectionChanged(): void {
@@ -421,6 +437,25 @@ export class Viewer {
       this.elementMaterials.set(elementId, material);
     }
     return material;
+  }
+
+  private initializeMouseWheelZoom(): void {
+    const handler = (event: WheelEvent) => {
+      if (event.deltaY === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      const zoomFactor = Math.exp(event.deltaY * 0.001);
+      const lowerLimit = this.camera.lowerRadiusLimit ?? 0.1;
+      const upperLimit = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
+      const targetRadius = this.camera.radius * zoomFactor;
+      const clampedRadius = Math.min(Math.max(targetRadius, lowerLimit), upperLimit);
+      this.camera.radius = clampedRadius;
+    };
+
+    this.canvas.addEventListener("wheel", handler, { passive: false });
+    this.wheelHandler = handler;
   }
 
   private pathFromPoints(points: ResolvedPoint[]): BabylonVector3[] | null {
