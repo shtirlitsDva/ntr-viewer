@@ -21,6 +21,14 @@ struct FileChangePayload {
     kind: String,
 }
 
+#[cfg(debug_assertions)]
+fn log_watch_event(message: &str) {
+    println!("[watch] {message}");
+}
+
+#[cfg(not(debug_assertions))]
+fn log_watch_event(_message: &str) {}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -81,6 +89,7 @@ fn start_file_watch(
     state: tauri::State<WatcherState>,
     path: String,
 ) -> Result<(), String> {
+    log_watch_event(&format!("Starting watch for {}", path));
     let input_path = PathBuf::from(&path);
     if !input_path.exists() {
         return Err("File not found".into());
@@ -107,6 +116,19 @@ fn start_file_watch(
             Ok(event) => {
                 if should_emit_event(&event.kind) && paths_match(&event.paths, &file_path_for_match)
                 {
+                    #[cfg(debug_assertions)]
+                    {
+                        let paths: Vec<String> = event
+                            .paths
+                            .iter()
+                            .map(|path| normalize_path(path))
+                            .collect();
+                        log_watch_event(&format!(
+                            "Event {:?} for paths {:?}",
+                            event.kind, paths
+                        ));
+                    }
+
                     let payload = FileChangePayload {
                         path: emit_path_for_watch.as_ref().clone(),
                         kind: format_event_kind(&event.kind),
@@ -118,6 +140,7 @@ fn start_file_watch(
             }
             Err(err) => {
                 eprintln!("File watcher error: {err}");
+                log_watch_event(&format!("Watcher error: {err}"));
                 let _ = app_handle.emit(
                     "ntr-file-watch-error",
                     FileChangePayload {
@@ -152,6 +175,12 @@ fn start_file_watch(
 #[tauri::command]
 fn stop_file_watch(state: tauri::State<WatcherState>) -> Result<(), String> {
     let mut guard = state.inner.lock().expect("watcher state poisoned");
+    #[cfg(debug_assertions)]
+    {
+        if guard.is_some() {
+            log_watch_event("Stopping active watcher");
+        }
+    }
     guard.take();
     Ok(())
 }

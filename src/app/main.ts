@@ -355,9 +355,10 @@ const handleFileChangeEvent = async (payload: FileChangePayload) => {
         result.message || undefined,
       ),
     );
-    forgetLastFile();
-    resetViewerState();
-    void stopFileWatch();
+    if (import.meta.env.DEV) {
+      console.warn("[watch] reload failed", payload, result);
+    }
+    // Keep watching; editors may rewrite files via temporary deletes before recreating them.
   }
 };
 
@@ -375,6 +376,9 @@ const setupFileWatchListeners = async () => {
   try {
     unlistenFileChange?.();
     unlistenFileChange = await listen<FileChangePayload>("ntr-file-changed", async (event) => {
+      if (import.meta.env.DEV) {
+        console.debug("[watch] change", event.payload.kind, event.payload.path);
+      }
       await handleFileChangeEvent(event.payload);
     });
 
@@ -382,6 +386,9 @@ const setupFileWatchListeners = async () => {
     unlistenWatchError = await listen<FileChangePayload>(
       "ntr-file-watch-error",
       (event) => {
+        if (import.meta.env.DEV) {
+          console.warn("[watch] error", event.payload.kind, event.payload.path);
+        }
         handleFileWatchError(event.payload);
       },
     );
