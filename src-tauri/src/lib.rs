@@ -70,7 +70,7 @@ fn read_ntr_file(path: &Path) -> Result<OpenFileResponse, String> {
         .map_err(|err| format!("Failed to read file bytes: {err}"))?;
     let contents = decode_ntr_bytes(&bytes)?;
     Ok(OpenFileResponse {
-        path: path.to_string_lossy().to_string(),
+        path: normalize_path(path),
         contents,
     })
 }
@@ -182,12 +182,16 @@ fn paths_match(event_paths: &[PathBuf], target: &str) -> bool {
 }
 
 fn normalize_path(path: &Path) -> String {
-    let normalized = path.to_string_lossy().replace('\\', "/");
+    let mut normalized = path.to_string_lossy().replace('\\', "/");
     if cfg!(windows) {
-        normalized.to_lowercase()
-    } else {
-        normalized
+        if normalized.starts_with("//?/UNC/") {
+            normalized = format!("//{}", &normalized[8..]);
+        } else if normalized.starts_with("//?/") {
+            normalized = normalized[4..].to_string();
+        }
+        normalized = normalized.to_lowercase();
     }
+    normalized
 }
 
 fn decode_ntr_bytes(bytes: &[u8]) -> Result<String, String> {

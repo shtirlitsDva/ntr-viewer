@@ -55,7 +55,13 @@ const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
 const normalizePath = (value: string): string => {
   const unified = value.replace(/\\/g, "/");
-  return isWindows ? unified.toLowerCase() : unified;
+  let withoutPrefix = unified;
+  if (unified.startsWith("//?/UNC/")) {
+    withoutPrefix = `//${unified.slice(8)}`;
+  } else if (unified.startsWith("//?/")) {
+    withoutPrefix = unified.slice(4);
+  }
+  return isWindows ? withoutPrefix.toLowerCase() : withoutPrefix;
 };
 
 const pathsMatch = (a: string, b: string): boolean => normalizePath(a) === normalizePath(b);
