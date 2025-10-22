@@ -387,7 +387,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
           "arm-inlet",
           element.start,
           element.center,
-          { diameterBottom: element.inletOuterDiameter, diameterTop: element.inletOuterDiameter },
+          {
+            diameterBottom: element.inletOuterDiameter,
+            diameterTop: element.inletOuterDiameter,
+          },
         );
         if (inlet) meshes.push(inlet);
         const outlet = this.createCylinderSegment(
@@ -395,7 +398,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
           "arm-outlet",
           element.center,
           element.end,
-          { diameterBottom: element.outletOuterDiameter, diameterTop: element.outletOuterDiameter },
+          {
+            diameterBottom: element.outletOuterDiameter,
+            diameterTop: element.outletOuterDiameter,
+          },
         );
         if (outlet) meshes.push(outlet);
         break;
@@ -428,6 +434,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (start.kind !== "coordinate" || end.kind !== "coordinate") {
       return null;
     }
+
     const startVec = new BabylonVector3(
       start.scenePosition.x,
       start.scenePosition.y,
@@ -439,36 +446,30 @@ export class BabylonSceneRenderer implements SceneRenderer {
       end.scenePosition.z,
     );
 
-    const diff = endVec.subtract(startVec);
-    const length = diff.length();
+    const delta = endVec.subtract(startVec);
+    const length = delta.length();
     if (length <= 1e-4) {
       return null;
     }
 
-    const axis = diff.normalize();
-    const center = startVec.add(diff.scale(0.5));
-    const name = `${elementId}-${suffix}`;
+    const axis = delta.normalize();
+    const center = startVec.add(delta.scale(0.5));
+
     const tessellation = this.resolveTessellation({
       diameter: options.diameter,
       startDiameter: options.diameterBottom,
       endDiameter: options.diameterTop,
     });
 
-    const diameterBottom =
-      options.diameterBottom ?? options.diameter ?? options.diameterTop ?? DEFAULT_PIPE_DIAMETER;
-    const diameterTop =
-      options.diameterTop ?? options.diameter ?? options.diameterBottom ?? DEFAULT_PIPE_DIAMETER;
-
-    if (diameterBottom <= 0 && diameterTop <= 0) {
-      return null;
-    }
+    const bottom = Math.max(options.diameterBottom ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const top = Math.max(options.diameterTop ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
 
     const mesh = MeshBuilder.CreateCylinder(
-      name,
+      `${elementId}-${suffix}`,
       {
         height: length,
-        diameterBottom: Math.max(diameterBottom, 0.01),
-        diameterTop: Math.max(diameterTop, 0.01),
+        diameterBottom: bottom,
+        diameterTop: top,
         tessellation,
         subdivisions: 1,
         sideOrientation: Mesh.DOUBLESIDE,
