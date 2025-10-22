@@ -12,7 +12,7 @@ struct WatcherState {
 
 struct ActiveWatcher {
     _watcher: RecommendedWatcher,
-    _path: PathBuf,
+    _file_path: PathBuf,
 }
 
 #[derive(Clone, Serialize)]
@@ -92,8 +92,8 @@ fn start_file_watch(
     let canonical_path = input_path
         .canonicalize()
         .unwrap_or_else(|_| input_path.clone());
-    let emit_path = Arc::new(canonical_path.to_string_lossy().to_string());
-    let emit_path_for_watch = emit_path.clone();
+    let normalized_path = Arc::new(normalize_path(&canonical_path));
+    let emit_path_for_watch = normalized_path.clone();
     let app_handle = app.clone();
 
     {
@@ -101,10 +101,12 @@ fn start_file_watch(
         guard.take();
     }
 
+    let file_path_for_match = normalized_path.clone();
     let mut watcher = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         match res {
             Ok(event) => {
-                if should_emit_event(&event.kind) {
+                if should_emit_event(&event.kind) && paths_match(&event.paths, &file_path_for_match)
+                {
                     let payload = FileChangePayload {
                         path: emit_path_for_watch.as_ref().clone(),
                         kind: format_event_kind(&event.kind),
@@ -131,14 +133,18 @@ fn start_file_watch(
     watcher
         .configure(Config::default())
         .map_err(|err| err.to_string())?;
+    let watch_target = canonical_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| canonical_path.clone());
     watcher
-        .watch(&canonical_path, RecursiveMode::NonRecursive)
+        .watch(&watch_target, RecursiveMode::NonRecursive)
         .map_err(|err| err.to_string())?;
 
     let mut guard = state.inner.lock().expect("watcher state poisoned");
     *guard = Some(ActiveWatcher {
         _watcher: watcher,
-        _path: canonical_path,
+        _file_path: canonical_path,
     });
     Ok(())
 }
@@ -162,6 +168,25 @@ fn format_event_kind(kind: &EventKind) -> String {
         EventKind::Access(_) => "access".into(),
         EventKind::Any => "any".into(),
         _ => "other".into(),
+    }
+}
+
+fn paths_match(event_paths: &[PathBuf], target: &str) -> bool {
+    if event_paths.is_empty() {
+        return true;
+    }
+    event_paths
+        .iter()
+        .map(|path| normalize_path(path))
+        .any(|candidate| candidate == target)
+}
+
+fn normalize_path(path: &Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized
     }
 }
 
