@@ -1,5 +1,6 @@
 use encoding_rs::{Encoding, UTF_8, WINDOWS_1252};
 use serde::Serialize;
+use std::path::Path;
 use tauri_plugin_dialog::DialogExt;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -30,14 +31,30 @@ fn open_ntr_file(app: tauri::AppHandle) -> Result<Option<OpenFileResponse>, Stri
         return Err("Selected file is not accessible on this platform".into());
     };
 
-    let bytes = std::fs::read(&path)
+    let response = read_ntr_file(path)?;
+    Ok(Some(response))
+}
+
+#[tauri::command]
+fn load_ntr_file(path: String) -> Result<OpenFileResponse, String> {
+    let resolved = Path::new(&path);
+    if !resolved.exists() {
+        return Err("File not found".into());
+    }
+    if !resolved.is_file() {
+        return Err("Path does not point to a file".into());
+    }
+    read_ntr_file(resolved)
+}
+
+fn read_ntr_file(path: &Path) -> Result<OpenFileResponse, String> {
+    let bytes = std::fs::read(path)
         .map_err(|err| format!("Failed to read file bytes: {err}"))?;
     let contents = decode_ntr_bytes(&bytes)?;
-    let response = OpenFileResponse {
+    Ok(OpenFileResponse {
         path: path.to_string_lossy().to_string(),
         contents,
-    };
-    Ok(Some(response))
+    })
 }
 
 fn decode_ntr_bytes(bytes: &[u8]) -> Result<String, String> {
@@ -74,7 +91,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, open_ntr_file])
+        .invoke_handler(tauri::generate_handler![greet, open_ntr_file, load_ntr_file])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -1,4 +1,4 @@
-import { openNtrFile } from "@app/api/files";
+import { loadNtrFileAtPath, openNtrFile } from "@app/api/files";
 import { initializeTelemetry, recordTelemetry, setTelemetryEnabled } from "@app/telemetry";
 import { parseNtr } from "@ntr/parser";
 import type { ParseIssue } from "@ntr/model";
@@ -33,6 +33,34 @@ let telemetryToggle: HTMLInputElement;
 let toastContainer: HTMLElement;
 
 const activeToasts = new Map<string, HTMLElement>();
+const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
+
+type LoadSource = "manual" | "restore";
+
+const rememberLastFile = (path: string) => {
+  try {
+    localStorage.setItem(LAST_FILE_STORAGE_KEY, path);
+  } catch (error) {
+    console.warn("Failed to persist last file path", error);
+  }
+};
+
+const forgetLastFile = () => {
+  try {
+    localStorage.removeItem(LAST_FILE_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to clear last file path", error);
+  }
+};
+
+const getRememberedFile = (): string | null => {
+  try {
+    return localStorage.getItem(LAST_FILE_STORAGE_KEY);
+  } catch (error) {
+    console.warn("Failed to read last file path", error);
+    return null;
+  }
+};
 
 const getCanvas = (): HTMLCanvasElement => {
   const canvas = document.querySelector<HTMLCanvasElement>("#viewer-canvas");
@@ -186,69 +214,120 @@ const initializeTelemetryPreferences = () => {
   telemetryToggle.checked = enabled;
 };
 
+const loadFileFromContents = (path: string, contents: string, source: LoadSource): boolean => {
+  const parseResult = parseNtr(path, contents);
+
+  if (!isOk(parseResult)) {
+    state = {
+      filePath: path,
+      graph: null,
+      issues: [...parseResult.error],
+    };
+    viewer?.load({ elements: [], bounds: null });
+    viewer?.setSelection(null);
+    renderFilePath(path);
+    renderSelection(null);
+    renderIssues(state.issues);
+
+    publishToast(
+      createToast(
+        "error",
+        source === "manual" ? "Failed to load NTR file" : "Failed to reload NTR file",
+        parseResult.error[0]?.message ?? "Unexpected parser error",
+      ),
+    );
+
+    recordTelemetry("file_open_failed", {
+      issueCount: state.issues.length,
+      method: source,
+    });
+
+    if (source === "restore") {
+      forgetLastFile();
+    }
+
+    return false;
+  }
+
+  const graph = buildSceneGraph(parseResult.value.file);
+  state = {
+    filePath: path,
+    graph,
+    issues: [...parseResult.value.issues],
+  };
+
+  viewer?.load(graph);
+  viewer?.setSelection(null);
+  renderFilePath(path);
+  renderSelection(null);
+  renderIssues(state.issues);
+
+  const warningCount = state.issues.filter((issue) => issue.severity === "warning").length;
+  const fileName = getFileName(path);
+  const toastLevel = warningCount > 0 ? "warning" : "success";
+  const toastTitleBase = source === "manual" ? "Loaded" : "Restored";
+  publishToast(
+    createToast(
+      toastLevel,
+      warningCount > 0
+        ? `${toastTitleBase} ${fileName} with warnings`
+        : `${toastTitleBase} ${fileName}`,
+      warningCount > 0 ? `${warningCount} warnings detected` : undefined,
+    ),
+  );
+
+  recordTelemetry("file_opened", {
+    elementCount: graph.elements.length,
+    warnings: warningCount,
+    method: source,
+  });
+
+  rememberLastFile(path);
+  return true;
+};
+
 const handleOpenFile = async () => {
   const result = await openNtrFile();
   if (result.status === "cancelled") {
     return;
   }
 
+  if (result.status === "error") {
+    publishToast(createToast("error", "Failed to open NTR file", result.message));
+    return;
+  }
+
   try {
-    const parseResult = parseNtr(result.path, result.contents);
-
-    if (!isOk(parseResult)) {
-      state = {
-        filePath: result.path,
-        graph: null,
-        issues: [...parseResult.error],
-      };
-      viewer?.load({ elements: [], bounds: null });
-      viewer?.setSelection(null);
-      renderFilePath(result.path);
-      renderSelection(null);
-      renderIssues(state.issues);
-      publishToast(
-        createToast(
-          "error",
-          "Failed to load NTR file",
-          parseResult.error[0]?.message ?? "Unexpected parser error",
-        ),
-      );
-      recordTelemetry("file_open_failed", {
-        issueCount: state.issues.length,
-      });
-      return;
-    }
-
-    const graph = buildSceneGraph(parseResult.value.file);
-    state = {
-      filePath: result.path,
-      graph,
-      issues: [...parseResult.value.issues],
-    };
-
-    viewer?.load(graph);
-    viewer?.setSelection(null);
-    renderFilePath(result.path);
-    renderSelection(null);
-    renderIssues(state.issues);
-
-    const warningCount = state.issues.filter((issue) => issue.severity === "warning").length;
-    const fileName = getFileName(result.path);
-    publishToast(
-      createToast(
-        warningCount > 0 ? "warning" : "success",
-        warningCount > 0 ? `Loaded ${fileName} with warnings` : `Loaded ${fileName}`,
-        warningCount > 0 ? `${warningCount} warnings detected` : undefined,
-      ),
-    );
-
-    recordTelemetry("file_opened", {
-      elementCount: graph.elements.length,
-      warnings: warningCount,
-    });
+    loadFileFromContents(result.path, result.contents, "manual");
   } catch (error) {
     console.error(error);
     publishToast(createToast("error", "Unexpected error while opening file"));
+  }
+};
+
+const restoreLastFile = async () => {
+  const remembered = getRememberedFile();
+  if (!remembered) {
+    return;
+  }
+
+  const result = await loadNtrFileAtPath(remembered);
+  if (result.status === "success") {
+    try {
+      loadFileFromContents(result.path, result.contents, "restore");
+    } catch (error) {
+      console.error(error);
+      publishToast(createToast("error", "Unexpected error while reloading last file"));
+      forgetLastFile();
+    }
+    return;
+  }
+
+  if (result.status === "error") {
+    forgetLastFile();
+    publishToast(
+      createToast("warning", "Last NTR file unavailable", result.message || undefined),
+    );
   }
 };
 
@@ -418,4 +497,5 @@ const fitToCurrentBounds = () => {
 
 window.addEventListener("DOMContentLoaded", () => {
   initialize();
+  void restoreLastFile();
 });
