@@ -1,4 +1,9 @@
-import { loadNtrFileAtPath, openNtrFile } from "@app/api/files";
+import {
+  loadNtrFileAtPath,
+  openNtrFile,
+  startFileWatch,
+  stopFileWatch,
+} from "@app/api/files";
 import { initializeTelemetry, recordTelemetry, setTelemetryEnabled } from "@app/telemetry";
 import { parseNtr } from "@ntr/parser";
 import type { ParseIssue } from "@ntr/model";
@@ -11,6 +16,7 @@ import {
 import { Viewer, type ColorMode } from "@viewer/viewer";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
+import { listen } from "@tauri-apps/api/event";
 
 interface AppState {
   filePath: string | null;
@@ -35,7 +41,24 @@ let toastContainer: HTMLElement;
 const activeToasts = new Map<string, HTMLElement>();
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
 
-type LoadSource = "manual" | "restore";
+interface FileChangePayload {
+  readonly path: string;
+  readonly kind: string;
+}
+
+type LoadSource = "manual" | "restore" | "watch";
+
+let unlistenFileChange: (() => void) | null = null;
+let unlistenWatchError: (() => void) | null = null;
+
+const isWindows = navigator.userAgent.toLowerCase().includes("windows");
+
+const normalizePath = (value: string): string => {
+  const unified = value.replace(/\\/g, "/");
+  return isWindows ? unified.toLowerCase() : unified;
+};
+
+const pathsMatch = (a: string, b: string): boolean => normalizePath(a) === normalizePath(b);
 
 const rememberLastFile = (path: string) => {
   try {
@@ -68,6 +91,19 @@ const getCanvas = (): HTMLCanvasElement => {
     throw new Error("Viewer canvas not found");
   }
   return canvas;
+};
+
+const resetViewerState = () => {
+  state = {
+    filePath: null,
+    issues: [],
+    graph: null,
+  };
+  viewer?.load({ elements: [], bounds: null });
+  viewer?.setSelection(null);
+  renderFilePath(null);
+  renderSelection(null);
+  renderIssues([]);
 };
 
 const initialize = () => {
@@ -244,6 +280,7 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
 
     if (source === "restore") {
       forgetLastFile();
+      void stopFileWatch();
     }
 
     return false;
@@ -256,7 +293,7 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
     issues: [...parseResult.value.issues],
   };
 
-  viewer?.load(graph);
+  viewer?.load(graph, { maintainCamera: source === "watch" });
   viewer?.setSelection(null);
   renderFilePath(path);
   renderSelection(null);
@@ -283,7 +320,68 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
   });
 
   rememberLastFile(path);
+  if (source !== "watch") {
+    void startFileWatch(path);
+  }
   return true;
+};
+
+const handleFileChangeEvent = async (payload: FileChangePayload) => {
+  if (!state.filePath) {
+    return;
+  }
+
+  if (!pathsMatch(state.filePath, payload.path)) {
+    return;
+  }
+
+  const result = await loadNtrFileAtPath(payload.path);
+  if (result.status === "success") {
+    loadFileFromContents(result.path, result.contents, "watch");
+    return;
+  }
+
+  if (result.status === "error") {
+    publishToast(
+      createToast(
+        "warning",
+        "File change detected but reload failed",
+        result.message || undefined,
+      ),
+    );
+    forgetLastFile();
+    resetViewerState();
+    void stopFileWatch();
+  }
+};
+
+const handleFileWatchError = (payload: FileChangePayload) => {
+  publishToast(
+    createToast(
+      "warning",
+      "File watch error",
+      payload.kind.replace(/^error:/, "").trim() || undefined,
+    ),
+  );
+};
+
+const setupFileWatchListeners = async () => {
+  try {
+    unlistenFileChange?.();
+    unlistenFileChange = await listen<FileChangePayload>("ntr-file-changed", async (event) => {
+      await handleFileChangeEvent(event.payload);
+    });
+
+    unlistenWatchError?.();
+    unlistenWatchError = await listen<FileChangePayload>(
+      "ntr-file-watch-error",
+      (event) => {
+        handleFileWatchError(event.payload);
+      },
+    );
+  } catch (error) {
+    console.warn("Failed to set up file watch listeners", error);
+  }
 };
 
 const handleOpenFile = async () => {
@@ -325,6 +423,8 @@ const restoreLastFile = async () => {
 
   if (result.status === "error") {
     forgetLastFile();
+    resetViewerState();
+    void stopFileWatch();
     publishToast(
       createToast("warning", "Last NTR file unavailable", result.message || undefined),
     );
@@ -497,5 +597,12 @@ const fitToCurrentBounds = () => {
 
 window.addEventListener("DOMContentLoaded", () => {
   initialize();
+  void setupFileWatchListeners();
   void restoreLastFile();
+});
+
+window.addEventListener("beforeunload", () => {
+  unlistenFileChange?.();
+  unlistenWatchError?.();
+  void stopFileWatch();
 });

@@ -42,6 +42,10 @@ type TubeOptions = {
   endDiameter?: number;
 };
 
+interface LoadOptions {
+  readonly maintainCamera?: boolean;
+}
+
 export class Viewer {
   private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
@@ -138,7 +142,7 @@ export class Viewer {
     this.engine.dispose();
   }
 
-  public load(graph: SceneGraph): void {
+  public load(graph: SceneGraph, options: LoadOptions = {}): void {
     this.clearElements();
     this.currentGraph = graph;
 
@@ -154,7 +158,9 @@ export class Viewer {
     this.updateColors();
     this.applySelectionColors();
     this.updateGround(graph.bounds);
-    this.fitToBounds(graph.bounds);
+    if (!options.maintainCamera) {
+      this.fitToBounds(graph.bounds);
+    }
   }
 
   public setColorMode(mode: ColorMode): void {

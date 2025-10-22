@@ -1,7 +1,24 @@
 use encoding_rs::{Encoding, UTF_8, WINDOWS_1252};
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
-use std::path::Path;
+use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}};
 use tauri_plugin_dialog::DialogExt;
+
+#[derive(Default)]
+struct WatcherState {
+    inner: Mutex<Option<ActiveWatcher>>,
+}
+
+struct ActiveWatcher {
+    watcher: RecommendedWatcher,
+    path: PathBuf,
+}
+
+#[derive(Serialize)]
+struct FileChangePayload {
+    path: String,
+    kind: String,
+}
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
@@ -57,6 +74,96 @@ fn read_ntr_file(path: &Path) -> Result<OpenFileResponse, String> {
     })
 }
 
+#[tauri::command]
+fn start_file_watch(
+    app: tauri::AppHandle,
+    state: tauri::State<WatcherState>,
+    path: String,
+) -> Result<(), String> {
+    let input_path = PathBuf::from(&path);
+    if !input_path.exists() {
+        return Err("File not found".into());
+    }
+    if !input_path.is_file() {
+        return Err("Path is not a file".into());
+    }
+
+    let canonical_path = input_path
+        .canonicalize()
+        .unwrap_or_else(|_| input_path.clone());
+    let emit_path = Arc::new(canonical_path.to_string_lossy().to_string());
+    let emit_path_for_watch = emit_path.clone();
+    let app_handle = app.clone();
+
+    {
+        let mut guard = state.inner.lock().expect("watcher state poisoned");
+        guard.take();
+    }
+
+    let mut watcher = notify::recommended_watcher(move |res| {
+        match res {
+            Ok(event) => {
+                if should_emit_event(&event.kind) {
+                    let payload = FileChangePayload {
+                        path: emit_path_for_watch.as_ref().clone(),
+                        kind: format_event_kind(&event.kind),
+                    };
+                    if let Err(err) = app_handle.emit("ntr-file-changed", payload) {
+                        eprintln!("Failed to emit file change event: {err}");
+                    }
+                }
+            }
+            Err(err) => {
+                eprintln!("File watcher error: {err}");
+                let _ = app_handle.emit(
+                    "ntr-file-watch-error",
+                    FileChangePayload {
+                        path: emit_path_for_watch.as_ref().clone(),
+                        kind: format!("error:{err}"),
+                    },
+                );
+            }
+        }
+    })
+    .map_err(|err| err.to_string())?;
+
+    watcher
+        .configure(Config::default())
+        .map_err(|err| err.to_string())?;
+    watcher
+        .watch(&canonical_path, RecursiveMode::NonRecursive)
+        .map_err(|err| err.to_string())?;
+
+    let mut guard = state.inner.lock().expect("watcher state poisoned");
+    *guard = Some(ActiveWatcher {
+        watcher,
+        path: canonical_path,
+    });
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_file_watch(state: tauri::State<WatcherState>) -> Result<(), String> {
+    let mut guard = state.inner.lock().expect("watcher state poisoned");
+    guard.take();
+    Ok(())
+}
+
+fn should_emit_event(kind: &EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_))
+}
+
+fn format_event_kind(kind: &EventKind) -> String {
+    match kind {
+        EventKind::Modify(_) => "modify".into(),
+        EventKind::Create(_) => "create".into(),
+        EventKind::Remove(_) => "remove".into(),
+        EventKind::Access(_) => "access".into(),
+        EventKind::Any => "any".into(),
+        _ => "other".into(),
+    }
+}
+
 fn decode_ntr_bytes(bytes: &[u8]) -> Result<String, String> {
     if bytes.is_empty() {
         return Ok(String::new());
@@ -91,7 +198,14 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, open_ntr_file, load_ntr_file])
+        .manage(WatcherState::default())
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            open_ntr_file,
+            load_ntr_file,
+            start_file_watch,
+            stop_file_watch
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

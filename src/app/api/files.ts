@@ -31,6 +31,22 @@ export const loadNtrFileAtPath = async (path: string): Promise<OpenNtrFileResult
   }
 };
 
+export const startFileWatch = async (path: string): Promise<void> => {
+  try {
+    await invoke("start_file_watch", { path });
+  } catch (error) {
+    console.warn("Failed to start file watch", error);
+  }
+};
+
+export const stopFileWatch = async (): Promise<void> => {
+  try {
+    await invoke("stop_file_watch");
+  } catch (error) {
+    console.warn("Failed to stop file watch", error);
+  }
+};
+
 const formatError = (error: unknown): string => {
   if (error instanceof Error) {
     return error.message;
