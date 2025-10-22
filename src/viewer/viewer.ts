@@ -78,7 +78,7 @@ export class Viewer {
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
     this.camera.wheelDeltaPercentage = 0.01;
-    this.camera.panningSensibility = 1_000;
+    this.camera.panningSensibility = 50;
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
     const pointerInput = this.camera.inputs.attached.pointers as
       | ArcRotateCameraPointersInput
@@ -88,6 +88,7 @@ export class Viewer {
       (pointerInput as unknown as { panningMouseButton?: number }).panningMouseButton = 0;
       pointerInput.angularSensibilityX = 1000;
       pointerInput.angularSensibilityY = 1000;
+      (pointerInput as unknown as { panningSensibility?: number }).panningSensibility = 50;
     }
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
