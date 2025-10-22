@@ -8,6 +8,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
 import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
@@ -29,7 +30,9 @@ const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
 const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 const DEFAULT_PIPE_DIAMETER = 50;
-const TUBE_TESSELLATION = 24;
+const MIN_TUBE_TESSELLATION = 64;
+const MAX_TUBE_TESSELLATION = 160;
+const MSAA_SAMPLES = 4;
 
 type SelectionListener = (elementId: string | null) => void;
 interface MeshMetadata {
@@ -58,6 +61,7 @@ export class Viewer {
   private readonly elementBaseColor = new Map<string, Color3>();
   private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
+  private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
   private wheelHandler: ((event: WheelEvent) => void) | null = null;
   private currentGraph: SceneGraph | null = null;
@@ -67,7 +71,7 @@ export class Viewer {
 
   public constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true });
+    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     this.scene = new Scene(this.engine);
 
     this.camera = new ArcRotateCamera(
@@ -87,6 +91,8 @@ export class Viewer {
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
     this.camera.inputs.add(new RevitStylePointerInput());
+
+    this.configureRenderingPipeline();
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
     light.intensity = 0.9;
@@ -138,6 +144,8 @@ export class Viewer {
       this.canvas.removeEventListener("wheel", this.wheelHandler);
       this.wheelHandler = null;
     }
+    this.renderPipeline?.dispose(false);
+    this.renderPipeline = null;
     this.scene.dispose();
     this.engine.dispose();
   }
@@ -388,6 +396,7 @@ export class Viewer {
 
     const name = `${elementId}-${suffix}`;
     let mesh: Mesh;
+    const tessellation = this.resolveTessellation(options);
     if (options.startDiameter !== undefined || options.endDiameter !== undefined) {
       const startRadius = this.diameterToRadius(options.startDiameter);
       const endRadius = this.diameterToRadius(options.endDiameter);
@@ -406,8 +415,9 @@ export class Viewer {
             const ratio = Math.min(Math.max(distance / totalLength, 0), 1);
             return startRadius + (endRadius - startRadius) * ratio;
           },
-          tessellation: TUBE_TESSELLATION,
+          tessellation,
           cap: Mesh.CAP_ALL,
+          sideOrientation: Mesh.DOUBLESIDE,
         },
         this.scene,
       );
@@ -421,8 +431,9 @@ export class Viewer {
         {
           path,
           radius,
-          tessellation: TUBE_TESSELLATION,
+          tessellation,
           cap: Mesh.CAP_ALL,
+          sideOrientation: Mesh.DOUBLESIDE,
         },
         this.scene,
       );
@@ -443,7 +454,6 @@ export class Viewer {
     if (!material) {
       material = new StandardMaterial(`${elementId}-material`, this.scene);
       material.specularColor = Color3.Black();
-      material.backFaceCulling = false;
       this.elementMaterials.set(elementId, material);
     }
     return material;
@@ -521,6 +531,37 @@ export class Viewer {
     const color = colorFromHue(hash % 360);
     this.materialColorCache.set(material, color);
     return color.clone();
+  }
+
+  private resolveTessellation(options: TubeOptions): number {
+    const candidates = [
+      options.diameter,
+      options.startDiameter,
+      options.endDiameter,
+    ].filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value > 0,
+    );
+
+    const referenceDiameter = candidates.length > 0 ? Math.max(...candidates) : DEFAULT_PIPE_DIAMETER;
+    const clamped = Number.isFinite(referenceDiameter) && referenceDiameter > 0
+      ? Math.round(referenceDiameter)
+      : DEFAULT_PIPE_DIAMETER;
+
+    return Math.max(MIN_TUBE_TESSELLATION, Math.min(MAX_TUBE_TESSELLATION, clamped));
+  }
+
+  private configureRenderingPipeline(): void {
+    if (!this.engine.getCaps().postProcessesSupported) {
+      return;
+    }
+
+    const pipeline = new DefaultRenderingPipeline("default-pipeline", true, this.scene, [this.camera]);
+    const maxSamples = this.engine.getCaps().maxMSAASamples;
+    pipeline.samples = maxSamples > 1 ? Math.min(MSAA_SAMPLES, maxSamples) : 1;
+    pipeline.fxaaEnabled = true;
+    pipeline.imageProcessingEnabled = true;
+    this.renderPipeline = pipeline;
   }
 }
 
