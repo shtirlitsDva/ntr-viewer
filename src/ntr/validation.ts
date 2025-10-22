@@ -7,6 +7,7 @@ import {
   asIdentifier,
   asKilograms,
   asLoadCaseCode,
+  asMillimeters,
   asMaterialCode,
   asNominalDiameterCode,
   asNodeId,
@@ -26,7 +27,13 @@ import {
   type PointReference,
   type Vector3,
 } from "./types.ts";
-import type { Element, NtrFile, ParseIssue } from "./model.ts";
+import type {
+  Element,
+  NominalDiameterDefinition,
+  NtrDefinitions,
+  NtrFile,
+  ParseIssue,
+} from "./model.ts";
 
 const identifierSchema = z
   .string()
@@ -129,6 +136,11 @@ const kilogrameSchema = z
   .min(0)
   .transform((value) => asKilograms(value));
 
+const millimetersSchema = z
+  .number()
+  .finite()
+  .transform((value) => asMillimeters(value));
+
 const elementBaseSchema = z
   .object({
     kind: z.enum(["RO", "BOG", "TEE", "ARM", "PROF", "RED"]),
@@ -209,6 +221,33 @@ const reducerSchema = elementBaseSchema
   })
   .transform((value) => value);
 
+const nominalDiameterDefinitionSchema = z
+  .object({
+    outsideDiameter: millimetersSchema,
+    thickness: millimetersSchema.optional(),
+  })
+  .strict()
+  .transform((value) => value as NominalDiameterDefinition);
+
+const definitionsSchema = z
+  .object({
+    nominalDiameters: z
+      .record(z.string(), nominalDiameterDefinitionSchema)
+      .default({}),
+  })
+  .strict()
+  .default({ nominalDiameters: {} })
+  .transform((value) => {
+    const result: NtrDefinitions["nominalDiameters"] = {} as NtrDefinitions["nominalDiameters"];
+    for (const [key, definition] of Object.entries(value.nominalDiameters)) {
+      const code = asNominalDiameterCode(key);
+      result[code] = definition;
+    }
+    return {
+      nominalDiameters: result,
+    } as NtrDefinitions;
+  });
+
 export const elementSchema = z
   .discriminatedUnion("kind", [
     straightPipeSchema,
@@ -243,6 +282,7 @@ export const ntrFileSchema = z
   .object({
     id: identifierSchema,
     metadata: metadataSchema,
+    definitions: definitionsSchema,
     elements: z.array(elementSchema).default([]),
     issues: z.array(parseIssueSchema).default([]),
   })

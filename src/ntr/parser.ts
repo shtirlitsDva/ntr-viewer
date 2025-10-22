@@ -1,10 +1,16 @@
 import { err, ok, type Result } from "@shared/result";
 
 import { lexNtr, type RawField, type RawRecord } from "./lexer.ts";
-import type { Element, NtrFile, ParseIssue } from "./model.ts";
+import type {
+  Element,
+  NtrFile,
+  NominalDiameterDefinition,
+  ParseIssue,
+} from "./model.ts";
 import {
   asComponentTag,
   asKilograms,
+  asMillimeters,
   asLoadCaseCode,
   asMaterialCode,
   asNominalDiameterCode,
@@ -19,6 +25,7 @@ import {
   createNamedPoint,
   type Kilograms,
   type LoadCaseCode,
+  type NominalDiameterCode,
   type PointReference,
   type Vector3,
 } from "./types.ts";
@@ -36,13 +43,61 @@ export const parseNtr = (
   const { records, issues } = lexNtr(source);
   const elements: Element[] = [];
   const collectedIssues: ParseIssue[] = [...issues];
+  const nominalDiameters = new Map<NominalDiameterCode, NominalDiameterDefinition>();
 
   for (const record of records) {
-    const result = parseRecord(record);
-    if (result.ok) {
-      elements.push(result.value);
-    } else {
-      collectedIssues.push(result.error);
+    switch (record.code) {
+      case "RO":
+      case "BOG":
+      case "TEE":
+      case "ARM":
+      case "PROF":
+      case "RED": {
+        const result = parseElementRecord(record);
+        if (result.ok) {
+          elements.push(result.value);
+        } else {
+          collectedIssues.push(result.error);
+        }
+        break;
+      }
+      case "DN": {
+        const result = parseNominalDiameterRecord(record);
+        if (result.ok) {
+          if (nominalDiameters.has(result.value.code)) {
+            collectedIssues.push(
+              createIssue(
+                record.code,
+                record.lineNumber,
+                `Duplicate DN definition for "${result.value.code}" ignored`,
+                "warning",
+              ),
+            );
+          } else {
+            nominalDiameters.set(result.value.code, result.value.definition);
+          }
+        } else {
+          collectedIssues.push(result.error);
+        }
+        break;
+      }
+      case "GEN":
+      case "AUFT":
+      case "TEXT":
+      case "LAST":
+      case "IS":
+        // Known non-geometric records. They are currently unused but intentionally ignored.
+        break;
+      default:
+        collectedIssues.push(
+          createIssue(
+            record.code,
+            record.lineNumber,
+            `Unsupported record code "${record.code}"`,
+            "warning",
+          ),
+        );
+        break;
     }
   }
 
@@ -53,6 +108,9 @@ export const parseNtr = (
   const validation = validateNtrFile({
     id,
     metadata: {},
+    definitions: {
+      nominalDiameters: mapToRecord(nominalDiameters),
+    },
     elements,
     issues: collectedIssues,
   });
@@ -70,7 +128,7 @@ export const parseNtr = (
   });
 };
 
-const parseRecord = (record: RawRecord): Result<Element, ParseIssue> => {
+const parseElementRecord = (record: RawRecord): Result<Element, ParseIssue> => {
   switch (record.code) {
     case "RO":
       return parseStraightPipe(record);
@@ -97,6 +155,33 @@ const parseRecord = (record: RawRecord): Result<Element, ParseIssue> => {
 };
 
 type FieldMap = Map<string, RawField>;
+
+interface NominalDiameterEntry {
+  readonly code: NominalDiameterCode;
+  readonly definition: NominalDiameterDefinition;
+}
+
+const parseNominalDiameterRecord = (record: RawRecord): Result<NominalDiameterEntry, ParseIssue> => {
+  const map = createFieldMap(record);
+
+  const nameField = requireField(record, map, "NAME");
+  if (!nameField.ok) return nameField;
+
+  const outerDiameter = requireNumericField(record, map, "DA");
+  if (!outerDiameter.ok) return outerDiameter;
+
+  const thickness = optionalNumericField(record, map, "S");
+  if (!thickness.ok) return thickness;
+
+  return ok({
+    code: asNominalDiameterCode(nameField.value.value),
+    definition: {
+      outsideDiameter: asMillimeters(outerDiameter.value),
+      thickness:
+        thickness.value === undefined ? undefined : asMillimeters(thickness.value),
+    },
+  });
+};
 
 const parseStraightPipe = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
@@ -314,6 +399,48 @@ const requireField = (
   return ok(field);
 };
 
+const requireNumericField = (
+  record: RawRecord,
+  map: FieldMap,
+  key: string,
+): Result<number, ParseIssue> => {
+  const field = requireField(record, map, key);
+  if (!field.ok) {
+    return field;
+  }
+  return parseNumericValue(record, key, field.value);
+};
+
+const optionalNumericField = (
+  record: RawRecord,
+  map: FieldMap,
+  key: string,
+): Result<number | undefined, ParseIssue> => {
+  const field = map.get(key);
+  if (!field) {
+    return ok(undefined);
+  }
+  return parseNumericValue(record, key, field);
+};
+
+const parseNumericValue = (
+  record: RawRecord,
+  key: string,
+  field: RawField,
+): Result<number, ParseIssue> => {
+  const numeric = Number.parseFloat(field.value);
+  if (Number.isNaN(numeric)) {
+    return err(
+      createIssue(
+        record.code,
+        field.lineNumber,
+        `Invalid numeric value "${field.value}" for field "${key}"`,
+      ),
+    );
+  }
+  return ok(numeric);
+};
+
 const requirePoint = (
   record: RawRecord,
   map: FieldMap,
@@ -444,6 +571,14 @@ const optionalMapped = <T>(
 const optionalString = (map: FieldMap, key: string): string | undefined => {
   const field = map.get(key);
   return field ? asString(field.value) : undefined;
+};
+
+const mapToRecord = <K extends string, V>(map: Map<K, V>): Record<K, V> => {
+  const record: Record<K, V> = {} as Record<K, V>;
+  for (const [key, value] of map.entries()) {
+    record[key] = value;
+  }
+  return record;
 };
 
 const createIssue = (

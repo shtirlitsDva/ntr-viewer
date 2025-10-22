@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { parseNtr } from "@ntr/parser";
+import { buildSceneGraph } from "@viewer/sceneGraph";
 
 const dataDir = join(process.cwd(), "data");
 
@@ -23,5 +24,10 @@ describe("Example.ntr parsing", () => {
     const { file, issues } = result.value;
     expect(file.elements.length).toBeGreaterThan(0);
     expect(issues.every((issue) => issue.severity !== "error")).toBe(true);
+    expect(Object.keys(file.definitions.nominalDiameters)).not.toHaveLength(0);
+
+    const graph = buildSceneGraph(file);
+    const firstPipe = graph.elements.find((element) => element.kind === "RO");
+    expect(firstPipe && "outerDiameter" in firstPipe ? firstPipe.outerDiameter : undefined).toBeGreaterThan(0);
   });
 });

@@ -4,7 +4,6 @@ import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 as BabylonVector3 } from "@babylonjs/core/Maths/math.vector";
-import { LinesMesh } from "@babylonjs/core/Meshes/linesMesh";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
@@ -27,11 +26,19 @@ const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
 
 const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
+const DEFAULT_PIPE_DIAMETER = 50;
+const TUBE_TESSELLATION = 24;
 
 type SelectionListener = (elementId: string | null) => void;
 interface MeshMetadata {
   elementId?: string;
 }
+
+type TubeOptions = {
+  diameter?: number;
+  startDiameter?: number;
+  endDiameter?: number;
+};
 
 export class Viewer {
   private readonly engine: Engine;
@@ -39,9 +46,10 @@ export class Viewer {
   private readonly camera: ArcRotateCamera;
   private readonly ground: Mesh;
   private readonly selectionListeners = new Set<SelectionListener>();
-  private readonly elementMeshes = new Map<string, LinesMesh[]>();
+  private readonly elementMeshes = new Map<string, Mesh[]>();
   private readonly elementLookup = new Map<string, SceneElement>();
   private readonly elementBaseColor = new Map<string, Color3>();
+  private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
   private resizeHandler: (() => void) | null = null;
   private currentGraph: SceneGraph | null = null;
@@ -198,6 +206,10 @@ export class Viewer {
     this.elementMeshes.clear();
     this.elementLookup.clear();
     this.elementBaseColor.clear();
+    for (const material of this.elementMaterials.values()) {
+      material.dispose(false, true);
+    }
+    this.elementMaterials.clear();
   }
 
   private updateGround(bounds: SceneGraph["bounds"]): void {
@@ -221,95 +233,194 @@ export class Viewer {
   private updateColors(): void {
     for (const [id, element] of this.elementLookup.entries()) {
       const color = this.getColorForElement(element);
-      this.elementBaseColor.set(id, color);
+      this.elementBaseColor.set(id, color.clone());
       if (this.selectedElement !== id) {
-        this.applyColorToMeshes(id, color);
+        this.applyMaterialColor(id, color, false);
       }
     }
   }
 
   private applySelectionColors(): void {
     for (const [id, baseColor] of this.elementBaseColor.entries()) {
-      if (this.selectedElement && id === this.selectedElement) {
-        this.applyColorToMeshes(id, HIGHLIGHT_COLOR);
-      } else {
-        this.applyColorToMeshes(id, baseColor);
-      }
+      const highlighted = this.selectedElement === id;
+      this.applyMaterialColor(id, highlighted ? HIGHLIGHT_COLOR : baseColor, highlighted);
     }
   }
 
-  private applyColorToMeshes(id: string, color: Color3): void {
-    const meshes = this.elementMeshes.get(id);
-    if (!meshes) {
+  private applyMaterialColor(id: string, color: Color3, highlight: boolean): void {
+    const material = this.elementMaterials.get(id);
+    if (!material) {
       return;
     }
-    meshes.forEach((mesh) => {
-      mesh.color = color.clone();
-    });
+    material.diffuseColor = color.clone();
+    material.emissiveColor = highlight ? color.scale(0.4) : Color3.Black();
   }
 
-  private createMeshesForElement(element: SceneElement): LinesMesh[] {
-    const segments: BabylonVector3[][] = [];
+  private createMeshesForElement(element: SceneElement): Mesh[] {
+    const meshes: Mesh[] = [];
     switch (element.kind) {
       case "RO": {
-        const segment = this.segmentFromPoints(element.start, element.end);
-        if (segment) segments.push(segment);
+        const mesh = this.createTubeFromPoints(element.id, "straight", [element.start, element.end], {
+          diameter: element.outerDiameter,
+        });
+        if (mesh) meshes.push(mesh);
         break;
       }
       case "PROF": {
-        const segment = this.segmentFromPoints(element.start, element.end);
-        if (segment) segments.push(segment);
+        const mesh = this.createTubeFromPoints(
+          element.id,
+          "profile",
+          [element.start, element.end],
+          { diameter: DEFAULT_PIPE_DIAMETER * 0.5 },
+        );
+        if (mesh) meshes.push(mesh);
         break;
       }
       case "BOG": {
-        const path = this.pathFromPoints([element.start, element.tangent, element.end]);
-        if (path) segments.push(path);
+        const mesh = this.createTubeFromPoints(
+          element.id,
+          "bend",
+          [element.start, element.tangent, element.end],
+          { diameter: element.outerDiameter },
+        );
+        if (mesh) meshes.push(mesh);
         break;
       }
       case "TEE": {
-        const main = this.segmentFromPoints(element.mainStart, element.mainEnd);
-        if (main) segments.push(main);
-        const branch = this.segmentFromPoints(element.branchStart, element.branchEnd);
-        if (branch) segments.push(branch);
+        const main = this.createTubeFromPoints(
+          element.id,
+          "tee-main",
+          [element.mainStart, element.mainEnd],
+          { diameter: element.mainOuterDiameter },
+        );
+        if (main) meshes.push(main);
+        const branch = this.createTubeFromPoints(
+          element.id,
+          "tee-branch",
+          [element.branchStart, element.branchEnd],
+          { diameter: element.branchOuterDiameter },
+        );
+        if (branch) meshes.push(branch);
         break;
       }
       case "ARM": {
-        const segment = this.segmentFromPoints(element.start, element.end);
-        if (segment) segments.push(segment);
+        const inlet = this.createTubeFromPoints(
+          element.id,
+          "arm-inlet",
+          [element.start, element.center],
+          { diameter: element.inletOuterDiameter },
+        );
+        if (inlet) meshes.push(inlet);
+        const outlet = this.createTubeFromPoints(
+          element.id,
+          "arm-outlet",
+          [element.center, element.end],
+          { diameter: element.outletOuterDiameter },
+        );
+        if (outlet) meshes.push(outlet);
         break;
       }
       case "RED": {
-        const segment = this.segmentFromPoints(element.start, element.end);
-        if (segment) segments.push(segment);
+        const mesh = this.createTubeFromPoints(
+          element.id,
+          "reducer",
+          [element.start, element.end],
+          {
+            startDiameter: element.inletOuterDiameter,
+            endDiameter: element.outletOuterDiameter,
+          },
+        );
+        if (mesh) meshes.push(mesh);
         break;
       }
     }
-
-    const meshes: LinesMesh[] = [];
-    segments.forEach((points, index) => {
-      if (points.length < 2) {
-        return;
-      }
-      const mesh = MeshBuilder.CreateLines(
-        `${element.id}-${index}`,
-        { points },
-        this.scene,
-      );
-      mesh.isPickable = true;
-      mesh.metadata = { elementId: element.id } satisfies MeshMetadata;
-      meshes.push(mesh);
-    });
-
     return meshes;
   }
 
-  private segmentFromPoints(start: ResolvedPoint, end: ResolvedPoint): BabylonVector3[] | null {
-    const startVec = this.pointToVector(start);
-    const endVec = this.pointToVector(end);
-    if (!startVec || !endVec) {
+  private createTubeFromPoints(
+    elementId: string,
+    suffix: string,
+    points: ResolvedPoint[],
+    options: TubeOptions,
+  ): Mesh | null {
+    const path = this.pathFromPoints(points);
+    if (!path) {
       return null;
     }
-    return [startVec, endVec];
+    return this.createTubeFromVectors(elementId, suffix, path, options);
+  }
+
+  private createTubeFromVectors(
+    elementId: string,
+    suffix: string,
+    path: BabylonVector3[],
+    options: TubeOptions,
+  ): Mesh | null {
+    if (path.length < 2) {
+      return null;
+    }
+
+    const name = `${elementId}-${suffix}`;
+    let mesh: Mesh;
+    if (options.startDiameter !== undefined || options.endDiameter !== undefined) {
+      const startRadius = this.diameterToRadius(options.startDiameter);
+      const endRadius = this.diameterToRadius(options.endDiameter);
+      if (startRadius <= 0 && endRadius <= 0) {
+        return null;
+      }
+      const totalLength = this.computePathLength(path);
+      if (totalLength <= 0) {
+        return null;
+      }
+      mesh = MeshBuilder.CreateTube(
+        name,
+        {
+          path,
+          radiusFunction: (_, distance) => {
+            const ratio = Math.min(Math.max(distance / totalLength, 0), 1);
+            return startRadius + (endRadius - startRadius) * ratio;
+          },
+          tessellation: TUBE_TESSELLATION,
+          cap: Mesh.CAP_ALL,
+        },
+        this.scene,
+      );
+    } else {
+      const radius = this.diameterToRadius(options.diameter);
+      if (radius <= 0) {
+        return null;
+      }
+      mesh = MeshBuilder.CreateTube(
+        name,
+        {
+          path,
+          radius,
+          tessellation: TUBE_TESSELLATION,
+          cap: Mesh.CAP_ALL,
+        },
+        this.scene,
+      );
+    }
+
+    return this.finalizeMesh(elementId, mesh);
+  }
+
+  private finalizeMesh(elementId: string, mesh: Mesh): Mesh {
+    mesh.isPickable = true;
+    mesh.metadata = { elementId } satisfies MeshMetadata;
+    mesh.material = this.getMaterialForElement(elementId);
+    return mesh;
+  }
+
+  private getMaterialForElement(elementId: string): StandardMaterial {
+    let material = this.elementMaterials.get(elementId);
+    if (!material) {
+      material = new StandardMaterial(`${elementId}-material`, this.scene);
+      material.specularColor = Color3.Black();
+      material.backFaceCulling = false;
+      this.elementMaterials.set(elementId, material);
+    }
+    return material;
   }
 
   private pathFromPoints(points: ResolvedPoint[]): BabylonVector3[] | null {
@@ -332,6 +443,20 @@ export class Viewer {
       return new BabylonVector3(point.position.x, point.position.y, point.position.z);
     }
     return null;
+  }
+
+  private diameterToRadius(diameter?: number): number {
+    const value = diameter ?? DEFAULT_PIPE_DIAMETER;
+    const safeValue = value > 0 ? value : DEFAULT_PIPE_DIAMETER;
+    return safeValue / 2;
+  }
+
+  private computePathLength(path: BabylonVector3[]): number {
+    let total = 0;
+    for (let i = 1; i < path.length; i += 1) {
+      total += BabylonVector3.Distance(path[i - 1], path[i]);
+    }
+    return total;
   }
 
   private getColorForElement(element: SceneElement): Color3 {

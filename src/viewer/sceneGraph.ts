@@ -2,6 +2,7 @@ import type {
   Arm,
   Bend,
   Element,
+  NominalDiameterDefinition,
   NtrFile,
   Profile,
   Reducer,
@@ -50,6 +51,7 @@ export interface SceneStraightPipe extends SceneElementCommon {
   readonly start: ResolvedPoint;
   readonly end: ResolvedPoint;
   readonly nominalDiameter: NominalDiameterCode;
+  readonly outerDiameter?: number;
 }
 
 export interface SceneProfile extends SceneElementCommon {
@@ -67,6 +69,7 @@ export interface SceneBend extends SceneElementCommon {
   readonly end: ResolvedPoint;
   readonly tangent: ResolvedPoint;
   readonly nominalDiameter: NominalDiameterCode;
+  readonly outerDiameter?: number;
 }
 
 export interface SceneTee extends SceneElementCommon {
@@ -77,6 +80,8 @@ export interface SceneTee extends SceneElementCommon {
   readonly branchEnd: ResolvedPoint;
   readonly mainNominalDiameter: NominalDiameterCode;
   readonly branchNominalDiameter: NominalDiameterCode;
+  readonly mainOuterDiameter?: number;
+  readonly branchOuterDiameter?: number;
   readonly teeType?: string;
 }
 
@@ -87,6 +92,8 @@ export interface SceneArm extends SceneElementCommon {
   readonly center: ResolvedPoint;
   readonly inletDiameter: NominalDiameterCode;
   readonly outletDiameter: NominalDiameterCode;
+  readonly inletOuterDiameter?: number;
+  readonly outletOuterDiameter?: number;
   readonly weight?: number;
 }
 
@@ -96,6 +103,8 @@ export interface SceneReducer extends SceneElementCommon {
   readonly end: ResolvedPoint;
   readonly inletDiameter: NominalDiameterCode;
   readonly outletDiameter: NominalDiameterCode;
+  readonly inletOuterDiameter?: number;
+  readonly outletOuterDiameter?: number;
 }
 
 export type SceneElement =
@@ -113,8 +122,9 @@ export interface SceneGraph {
 
 export const buildSceneGraph = (file: NtrFile): SceneGraph => {
   const builder = createBoundsBuilder();
+  const diameterLookup = file.definitions.nominalDiameters;
   const elements = file.elements.map((element, index) =>
-    convertElement(element, `element-${index}`, builder),
+    convertElement(element, `element-${index}`, builder, diameterLookup),
   );
 
   return {
@@ -127,20 +137,21 @@ const convertElement = (
   element: Element,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneElement => {
   switch (element.kind) {
     case "RO":
-      return convertStraightPipe(element, id, builder);
+      return convertStraightPipe(element, id, builder, lookup);
     case "PROF":
       return convertProfile(element, id, builder);
     case "BOG":
-      return convertBend(element, id, builder);
+      return convertBend(element, id, builder, lookup);
     case "TEE":
-      return convertTee(element, id, builder);
+      return convertTee(element, id, builder, lookup);
     case "ARM":
-      return convertArm(element, id, builder);
+      return convertArm(element, id, builder, lookup);
     case "RED":
-      return convertReducer(element, id, builder);
+      return convertReducer(element, id, builder, lookup);
   }
 };
 
@@ -157,10 +168,16 @@ const baseProps = (id: string, element: Element): SceneElementCommon => ({
   schedule: element.schedule,
 });
 
+const lookupOuterDiameter = (
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  code: NominalDiameterCode,
+): number | undefined => lookup[code]?.outsideDiameter;
+
 const convertStraightPipe = (
   element: StraightPipe,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneStraightPipe => {
   const start = resolvePoint(element.start, builder);
   const end = resolvePoint(element.end, builder);
@@ -170,6 +187,7 @@ const convertStraightPipe = (
     start,
     end,
     nominalDiameter: element.nominalDiameter,
+    outerDiameter: lookupOuterDiameter(lookup, element.nominalDiameter),
   };
 };
 
@@ -198,6 +216,7 @@ const convertBend = (
   element: Bend,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneBend => {
   const start = resolvePoint(element.start, builder);
   const end = resolvePoint(element.end, builder);
@@ -209,6 +228,7 @@ const convertBend = (
     start,
     end,
     tangent,
+    outerDiameter: lookupOuterDiameter(lookup, element.nominalDiameter),
   };
 };
 
@@ -216,6 +236,7 @@ const convertTee = (
   element: Tee,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneTee => {
   const mainStart = resolvePoint(element.mainStart, builder);
   const mainEnd = resolvePoint(element.mainEnd, builder);
@@ -231,6 +252,8 @@ const convertTee = (
     mainNominalDiameter: element.mainNominalDiameter,
     branchNominalDiameter: element.branchNominalDiameter,
     teeType: element.teeType,
+    mainOuterDiameter: lookupOuterDiameter(lookup, element.mainNominalDiameter),
+    branchOuterDiameter: lookupOuterDiameter(lookup, element.branchNominalDiameter),
   };
 };
 
@@ -238,6 +261,7 @@ const convertArm = (
   element: Arm,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneArm => {
   const start = resolvePoint(element.start, builder);
   const end = resolvePoint(element.end, builder);
@@ -250,6 +274,8 @@ const convertArm = (
     center,
     inletDiameter: element.inletDiameter,
     outletDiameter: element.outletDiameter,
+    inletOuterDiameter: lookupOuterDiameter(lookup, element.inletDiameter),
+    outletOuterDiameter: lookupOuterDiameter(lookup, element.outletDiameter),
     weight: element.weight === undefined ? undefined : Number(element.weight),
   };
 };
@@ -258,6 +284,7 @@ const convertReducer = (
   element: Reducer,
   id: string,
   builder: BoundsBuilder,
+  lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
 ): SceneReducer => {
   const start = resolvePoint(element.start, builder);
   const end = resolvePoint(element.end, builder);
@@ -268,6 +295,8 @@ const convertReducer = (
     end,
     inletDiameter: element.inletDiameter,
     outletDiameter: element.outletDiameter,
+    inletOuterDiameter: lookupOuterDiameter(lookup, element.inletDiameter),
+    outletOuterDiameter: lookupOuterDiameter(lookup, element.outletDiameter),
   };
 };
 

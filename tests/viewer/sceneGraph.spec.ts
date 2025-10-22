@@ -5,6 +5,7 @@ import { buildSceneGraph } from "@viewer/sceneGraph";
 import {
   asIdentifier,
   asKilograms,
+  asMillimeters,
   asNominalDiameterCode,
   createCoordinatePoint,
   createNamedPoint,
@@ -91,6 +92,14 @@ describe("buildSceneGraph", () => {
     const file: NtrFile = {
       id: asIdentifier("scene-test"),
       metadata: {},
+      definitions: {
+        nominalDiameters: {
+          [asNominalDiameterCode("DN150")]: { outsideDiameter: asMillimeters(168.3) },
+          [asNominalDiameterCode("DN200")]: { outsideDiameter: asMillimeters(219.1) },
+          [asNominalDiameterCode("DN100")]: { outsideDiameter: asMillimeters(114.3) },
+          [asNominalDiameterCode("DN80")]: { outsideDiameter: asMillimeters(88.9) },
+        },
+      },
       elements: [straight, tee, valve, reducer],
       issues: [],
     };

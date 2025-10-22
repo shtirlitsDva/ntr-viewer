@@ -84,3 +84,13 @@
 
 12. **Packaging & CI Hooks** ✅  
     GitHub Actions workflow runs lint/test/check/cargo/tauri build; README documents workflow; `npm run tauri:build` confirmed bundles (.deb/.rpm/.AppImage).
+
+## Build & Run Notes
+- **Dev loop (all platforms)**: `npm install`, then `npm run tauri:dev` for native shell with hot reload; `npm run dev` launches the Vite browser preview.
+- **Release bundles**: `npm run tauri:build` (wraps `tauri build --release`), artifacts emit into `src-tauri/target/release/bundle/`.
+- **Windows prerequisites**: Rust stable MSVC toolchain (`rustup default stable-x86_64-pc-windows-msvc`), Visual Studio Build Tools (Desktop C++ workload), and WebView2 runtime.
+
+### Windows Installer Without Global Node
+1. On any machine with Node, run `npm ci && npm run build` to generate `dist/`.
+2. Commit or ship the `dist/` output; update `tauri.conf.json` to leave `beforeBuildCommand` empty so `cargo tauri build` skips invoking Node.
+3. On the target Windows box (Rust + VS Build Tools only), execute `cargo tauri build --bundles msi`; Tauri consumes the prebuilt `dist/` assets and produces an installer without requiring a system Node installation.

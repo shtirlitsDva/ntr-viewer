@@ -3,6 +3,7 @@ import type {
   ComponentTag,
   Identifier,
   Kilograms,
+  Millimeters,
   LoadCaseCode,
   MaterialCode,
   NominalDiameterCode,
@@ -100,9 +101,19 @@ export interface NtrMetadata {
   readonly specification?: string;
 }
 
+export interface NominalDiameterDefinition {
+  readonly outsideDiameter: Millimeters;
+  readonly thickness?: Millimeters;
+}
+
+export interface NtrDefinitions {
+  readonly nominalDiameters: Record<NominalDiameterCode, NominalDiameterDefinition>;
+}
+
 export interface NtrFile {
   readonly id: Identifier;
   readonly metadata: NtrMetadata;
+  readonly definitions: NtrDefinitions;
   readonly elements: readonly Element[];
   readonly issues: readonly ParseIssue[];
 }
