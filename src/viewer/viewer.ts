@@ -14,11 +14,10 @@ import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
 import { RevitStylePointerInput } from "./RevitStylePointerInput.ts";
 
+import type { SceneRenderer, SceneRendererFactory, LoadOptions, SelectionListener, ColorMode } from "./engine";
 import type { ResolvedPoint, SceneElement, SceneGraph } from "@viewer/sceneGraph";
 
-export type ColorMode = "type" | "material";
-
-const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
+export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
   BOG: new Color3(0.2, 0.7, 0.9),
   TEE: new Color3(0.8, 0.3, 0.6),
@@ -27,14 +26,12 @@ const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RED: new Color3(0.9, 0.4, 0.2),
 };
 
-const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
+export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
-const DEFAULT_PIPE_DIAMETER = 50;
-const MIN_TUBE_TESSELLATION = 64;
-const MAX_TUBE_TESSELLATION = 160;
+export const DEFAULT_PIPE_DIAMETER = 50;
+const DEFAULT_MIN_TUBE_TESSELLATION = 64;
+const DEFAULT_MAX_TUBE_TESSELLATION = 160;
 const MSAA_SAMPLES = 4;
-
-type SelectionListener = (elementId: string | null) => void;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -45,11 +42,24 @@ type TubeOptions = {
   endDiameter?: number;
 };
 
-interface LoadOptions {
-  readonly maintainCamera?: boolean;
+interface InternalRendererOptions {
+  readonly minTessellation: number;
+  readonly maxTessellation: number;
+  readonly tessellationStrategy?: (input: TessellationStrategyInput) => number;
 }
 
-export class Viewer {
+export interface TessellationStrategyInput {
+  readonly diameters: number[];
+  readonly cameraRadius: number;
+}
+
+export interface BabylonRendererOptions {
+  readonly minTessellation?: number;
+  readonly maxTessellation?: number;
+  readonly tessellationStrategy?: (input: TessellationStrategyInput) => number;
+}
+
+export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
   private readonly scene: Scene;
@@ -61,6 +71,7 @@ export class Viewer {
   private readonly elementBaseColor = new Map<string, Color3>();
   private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
+  private readonly options: InternalRendererOptions;
   private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
   private wheelHandler: ((event: WheelEvent) => void) | null = null;
@@ -69,8 +80,19 @@ export class Viewer {
   private colorMode: ColorMode = "type";
   private gridVisible = true;
 
-  public constructor(canvas: HTMLCanvasElement) {
+  public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
+    this.options = {
+      minTessellation: Math.max(
+        8,
+        options.minTessellation ?? DEFAULT_MIN_TUBE_TESSELLATION,
+      ),
+      maxTessellation: Math.max(
+        options.minTessellation ?? DEFAULT_MIN_TUBE_TESSELLATION,
+        options.maxTessellation ?? DEFAULT_MAX_TUBE_TESSELLATION,
+      ),
+      tessellationStrategy: options.tessellationStrategy,
+    };
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     this.scene = new Scene(this.engine);
 
@@ -144,7 +166,7 @@ export class Viewer {
       this.canvas.removeEventListener("wheel", this.wheelHandler);
       this.wheelHandler = null;
     }
-    this.renderPipeline?.dispose(false);
+    this.renderPipeline?.dispose();
     this.renderPipeline = null;
     this.scene.dispose();
     this.engine.dispose();
@@ -534,7 +556,33 @@ export class Viewer {
   }
 
   private resolveTessellation(options: TubeOptions): number {
-    const candidates = [
+    const diameters = this.collectDiameters(options);
+    let target =
+      diameters.length > 0 ? Math.max(...diameters) : DEFAULT_PIPE_DIAMETER;
+
+    if (this.options.tessellationStrategy) {
+      const strategyValue = this.options.tessellationStrategy({
+        diameters,
+        cameraRadius: this.camera.radius,
+      });
+      if (Number.isFinite(strategyValue) && strategyValue > 0) {
+        target = strategyValue;
+      }
+    }
+
+    if (!Number.isFinite(target) || target <= 0) {
+      target = DEFAULT_PIPE_DIAMETER;
+    }
+
+    const rounded = Math.round(target);
+    return Math.max(
+      8,
+      Math.max(this.options.minTessellation, Math.min(this.options.maxTessellation, rounded)),
+    );
+  }
+
+  private collectDiameters(options: TubeOptions): number[] {
+    return [
       options.diameter,
       options.startDiameter,
       options.endDiameter,
@@ -542,20 +590,9 @@ export class Viewer {
       (value): value is number =>
         typeof value === "number" && Number.isFinite(value) && value > 0,
     );
-
-    const referenceDiameter = candidates.length > 0 ? Math.max(...candidates) : DEFAULT_PIPE_DIAMETER;
-    const clamped = Number.isFinite(referenceDiameter) && referenceDiameter > 0
-      ? Math.round(referenceDiameter)
-      : DEFAULT_PIPE_DIAMETER;
-
-    return Math.max(MIN_TUBE_TESSELLATION, Math.min(MAX_TUBE_TESSELLATION, clamped));
   }
 
   private configureRenderingPipeline(): void {
-    if (!this.engine.getCaps().postProcessesSupported) {
-      return;
-    }
-
     const pipeline = new DefaultRenderingPipeline("default-pipeline", true, this.scene, [this.camera]);
     const maxSamples = this.engine.getCaps().maxMSAASamples;
     pipeline.samples = maxSamples > 1 ? Math.min(MSAA_SAMPLES, maxSamples) : 1;
@@ -564,6 +601,24 @@ export class Viewer {
     this.renderPipeline = pipeline;
   }
 }
+
+export function createBabylonRenderer(canvas: HTMLCanvasElement): SceneRenderer;
+export function createBabylonRenderer(
+  canvas: HTMLCanvasElement,
+  options: BabylonRendererOptions,
+): SceneRenderer;
+export function createBabylonRenderer(
+  canvas: HTMLCanvasElement,
+  options: BabylonRendererOptions = {},
+): SceneRenderer {
+  return new BabylonSceneRenderer(canvas, options);
+}
+
+export const createDefaultBabylonRenderer: SceneRendererFactory = (canvas) =>
+  createBabylonRenderer(canvas);
+
+export type { SceneRenderer, LoadOptions, SelectionListener, ColorMode } from "./engine";
+
 
 const hashString = (value: string): number => {
   let hash = 0;

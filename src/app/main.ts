@@ -13,7 +13,9 @@ import {
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
-import { Viewer, type ColorMode } from "@viewer/viewer";
+// import { createBabylonRenderer } from "@viewer/viewer";
+import { createImpostorRenderer } from "@viewer/renderers";
+import type { ColorMode, SceneRenderer } from "@viewer/engine";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
 import { listen } from "@tauri-apps/api/event";
@@ -24,7 +26,7 @@ interface AppState {
   graph: SceneGraph | null;
 }
 
-let viewer: Viewer | null = null;
+let renderer: SceneRenderer | null = null;
 let state: AppState = {
   filePath: null,
   issues: [],
@@ -105,8 +107,8 @@ const resetViewerState = () => {
     issues: [],
     graph: null,
   };
-  viewer?.load({ elements: [], bounds: null });
-  viewer?.setSelection(null);
+  renderer?.load({ elements: [], bounds: null });
+  renderer?.setSelection(null);
   renderFilePath(null);
   renderSelection(null);
   renderIssues([]);
@@ -120,9 +122,12 @@ const initialize = () => {
   telemetryToggle = queryElement<HTMLInputElement>('[data-control="telemetry-toggle"]');
   toastContainer = queryElement<HTMLElement>('[data-state="toasts"]');
 
-  viewer = new Viewer(getCanvas());
-  viewer.onSelectionChanged(handleSelectionChange);
-  viewer.setGridVisible(gridToggle.checked);
+  // Swap renderer factories here for experimentation:
+  // renderer = createBabylonRenderer(getCanvas());
+  // renderer = createHighTessellationRenderer(getCanvas());
+  renderer = createImpostorRenderer(getCanvas());
+  renderer.onSelectionChanged(handleSelectionChange);
+  renderer.setGridVisible(gridToggle.checked);
 
   setupToolbar();
   setupKeyboardShortcuts();
@@ -151,7 +156,7 @@ const setupToolbar = () => {
   });
 
   queryElement<HTMLButtonElement>('[data-action="reset-view"]').addEventListener("click", () => {
-    viewer?.setSelection(null);
+    renderer?.setSelection(null);
     fitToCurrentBounds();
   });
 
@@ -159,12 +164,12 @@ const setupToolbar = () => {
     "change",
     (event) => {
       const select = event.target as HTMLSelectElement;
-      viewer?.setColorMode(select.value as ColorMode);
+      renderer?.setColorMode(select.value as ColorMode);
     },
   );
 
   gridToggle.addEventListener("change", () => {
-    viewer?.setGridVisible(gridToggle.checked);
+    renderer?.setGridVisible(gridToggle.checked);
   });
 
   telemetryToggle.addEventListener("change", () => {
@@ -193,13 +198,13 @@ const setupKeyboardShortcuts = () => {
         event.preventDefault();
         break;
       case "r":
-        viewer?.setSelection(null);
+        renderer?.setSelection(null);
         fitToCurrentBounds();
         event.preventDefault();
         break;
       case "g":
         gridToggle.checked = !gridToggle.checked;
-        viewer?.setGridVisible(gridToggle.checked);
+        renderer?.setGridVisible(gridToggle.checked);
         event.preventDefault();
         break;
       default:
@@ -265,8 +270,8 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
       graph: null,
       issues: [...parseResult.error],
     };
-    viewer?.load({ elements: [], bounds: null });
-    viewer?.setSelection(null);
+    renderer?.load({ elements: [], bounds: null });
+    renderer?.setSelection(null);
     renderFilePath(path);
     renderSelection(null);
     renderIssues(state.issues);
@@ -299,8 +304,8 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
     issues: [...parseResult.value.issues],
   };
 
-  viewer?.load(graph, { maintainCamera: source === "watch" });
-  viewer?.setSelection(null);
+  renderer?.load(graph, { maintainCamera: source === "watch" });
+  renderer?.setSelection(null);
   renderFilePath(path);
   renderSelection(null);
   renderIssues(state.issues);
@@ -605,7 +610,7 @@ const createEmptyState = (text: string): HTMLElement => {
 
 const fitToCurrentBounds = () => {
   const bounds = state.graph?.bounds ?? null;
-  viewer?.fitToBounds(bounds);
+  renderer?.fitToBounds(bounds);
 };
 
 window.addEventListener("DOMContentLoaded", () => {
