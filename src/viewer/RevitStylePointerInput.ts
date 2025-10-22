@@ -13,7 +13,7 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
     this.buttons = [1];
     this.angularSensibilityX = 1000;
     this.angularSensibilityY = 1000;
-    this.panningSensibility = 50;
+    this.panningSensibility = 0.5;
   }
 
   public override getClassName(): string {
