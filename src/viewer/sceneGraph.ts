@@ -27,7 +27,7 @@ import type {
 const transformVector = (position: Vector3): Vector3 => ({
   x: position.x,
   y: position.z,
-  z: -position.y,
+  z: position.y,
 });
 
 export interface BoundingBox {
