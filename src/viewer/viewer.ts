@@ -30,6 +30,8 @@ export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
 const MSAA_SAMPLES = 4;
+const Z_OFFSET_BUCKETS = 7;
+const Z_OFFSET_STEP = 0.08;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -61,6 +63,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private selectedElement: string | null = null;
   private colorMode: ColorMode = "type";
   private gridVisible = true;
+  private sceneOffset = new BabylonVector3(0, 0, 0);
 
   public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
@@ -147,6 +150,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   public load(graph: SceneGraph, options: LoadOptions = {}): void {
     this.clearElements();
     this.currentGraph = graph;
+    this.sceneOffset = this.computeSceneOffset(graph.bounds);
 
     graph.elements.forEach((element) => {
       const meshes = this.createMeshesForElement(element);
@@ -202,15 +206,22 @@ export class BabylonSceneRenderer implements SceneRenderer {
       return;
     }
 
+    const adjusted = this.adjustBounds(bounds);
+    if (!adjusted) {
+      this.camera.target = BabylonVector3.Zero();
+      this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      return;
+    }
+
     const center = new BabylonVector3(
-      (bounds.min.x + bounds.max.x) / 2,
-      (bounds.min.y + bounds.max.y) / 2,
-      (bounds.min.z + bounds.max.z) / 2,
+      (adjusted.min.x + adjusted.max.x) / 2,
+      (adjusted.min.y + adjusted.max.y) / 2,
+      (adjusted.min.z + adjusted.max.z) / 2,
     );
 
-    const spanX = bounds.max.x - bounds.min.x;
-    const spanY = bounds.max.y - bounds.min.y;
-    const spanZ = bounds.max.z - bounds.min.z;
+    const spanX = adjusted.max.x - adjusted.min.x;
+    const spanY = adjusted.max.y - adjusted.min.y;
+    const spanZ = adjusted.max.z - adjusted.min.z;
     const maxSpan = Math.max(spanX, spanY, spanZ, 1);
     const radius = maxSpan * 1.5;
     const farPlane = Math.max(maxSpan * 20, 10_000);
@@ -246,15 +257,21 @@ export class BabylonSceneRenderer implements SceneRenderer {
       return;
     }
 
-    const spanX = bounds.max.x - bounds.min.x;
-    const spanZ = bounds.max.z - bounds.min.z;
+    const adjusted = this.adjustBounds(bounds);
+    if (!adjusted) {
+      this.ground.isVisible = false;
+      return;
+    }
+
+    const spanX = adjusted.max.x - adjusted.min.x;
+    const spanZ = adjusted.max.z - adjusted.min.z;
     const size = Math.max(spanX, spanZ, 1);
 
     this.ground.scaling.x = size;
     this.ground.scaling.z = size;
-    this.ground.position.x = (bounds.min.x + bounds.max.x) / 2;
-    this.ground.position.z = (bounds.min.z + bounds.max.z) / 2;
-    this.ground.position.y = bounds.min.y;
+    this.ground.position.x = (adjusted.min.x + adjusted.max.x) / 2;
+    this.ground.position.z = (adjusted.min.z + adjusted.max.z) / 2;
+    this.ground.position.y = adjusted.min.y;
     this.ground.isVisible = this.gridVisible;
   }
 
@@ -412,6 +429,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
       end.scenePosition.z,
     );
 
+    startVec.subtractInPlace(this.sceneOffset);
+    endVec.subtractInPlace(this.sceneOffset);
+
     const path = [startVec, endVec];
     const startDiameter = Math.max(options.startDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
     const endDiameter = Math.max(options.endDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
@@ -453,9 +473,17 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!material) {
       material = new StandardMaterial(`${elementId}-material`, this.scene);
       material.specularColor = Color3.Black();
+      material.zOffset = this.getZOffsetForElement(elementId);
+      material.zOffsetUnits = 1;
       this.elementMaterials.set(elementId, material);
     }
     return material;
+  }
+
+  private getZOffsetForElement(elementId: string): number {
+    const bucket = hashString(elementId) % Z_OFFSET_BUCKETS;
+    const centered = bucket - Math.floor(Z_OFFSET_BUCKETS / 2);
+    return centered * Z_OFFSET_STEP;
   }
 
   private initializeMouseWheelZoom(): void {
@@ -502,6 +530,35 @@ export class BabylonSceneRenderer implements SceneRenderer {
     pipeline.fxaaEnabled = true;
     pipeline.imageProcessingEnabled = true;
     this.renderPipeline = pipeline;
+  }
+
+  private computeSceneOffset(bounds: SceneGraph["bounds"]): BabylonVector3 {
+    if (!bounds) {
+      return new BabylonVector3(0, 0, 0);
+    }
+    return new BabylonVector3(
+      (bounds.min.x + bounds.max.x) / 2,
+      (bounds.min.y + bounds.max.y) / 2,
+      (bounds.min.z + bounds.max.z) / 2,
+    );
+  }
+
+  private adjustBounds(bounds: SceneGraph["bounds"]): SceneGraph["bounds"] | null {
+    if (!bounds) {
+      return null;
+    }
+    return {
+      min: {
+        x: bounds.min.x - this.sceneOffset.x,
+        y: bounds.min.y - this.sceneOffset.y,
+        z: bounds.min.z - this.sceneOffset.z,
+      },
+      max: {
+        x: bounds.max.x - this.sceneOffset.x,
+        y: bounds.max.y - this.sceneOffset.y,
+        z: bounds.max.z - this.sceneOffset.z,
+      },
+    };
   }
 }
 
