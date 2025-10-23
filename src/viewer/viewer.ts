@@ -475,8 +475,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
       material.specularColor = Color3.Black();
       material.zOffset = this.getZOffsetForElement(elementId);
       material.zOffsetUnits = 0;
-      material.useLogarithmicDepth = true;
-      material.needDepthPrePass = true;
       this.elementMaterials.set(elementId, material);
     }
     return material;
