@@ -3,7 +3,7 @@ import { PointerEventTypes, PointerInfo } from "@babylonjs/core/Events/pointerEv
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
-import { Quaternion, Vector3 as BabylonVector3 } from "@babylonjs/core/Maths/math.vector";
+import { Vector3 as BabylonVector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
@@ -34,10 +34,10 @@ interface MeshMetadata {
   elementId?: string;
 }
 
-interface CylinderOptions {
+interface TubeOptions {
   readonly diameter?: number;
-  readonly diameterTop?: number;
-  readonly diameterBottom?: number;
+  readonly startDiameter?: number;
+  readonly endDiameter?: number;
 }
 
 export interface BabylonRendererOptions {}
@@ -288,7 +288,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const meshes: Mesh[] = [];
     switch (element.kind) {
       case "RO": {
-        const mesh = this.createCylinderSegment(
+        const mesh = this.createTubeSegment(
           element.id,
           "straight",
           element.start,
@@ -299,7 +299,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "PROF": {
-        const mesh = this.createCylinderSegment(
+        const mesh = this.createTubeSegment(
           element.id,
           "profile",
           element.start,
@@ -310,7 +310,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "BOG": {
-        const first = this.createCylinderSegment(
+        const first = this.createTubeSegment(
           element.id,
           "bend-segment-1",
           element.start,
@@ -318,7 +318,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
           { diameter: element.outerDiameter },
         );
         if (first) meshes.push(first);
-        const second = this.createCylinderSegment(
+        const second = this.createTubeSegment(
           element.id,
           "bend-segment-2",
           element.tangent,
@@ -329,7 +329,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "TEE": {
-        const main = this.createCylinderSegment(
+        const main = this.createTubeSegment(
           element.id,
           "tee-main",
           element.mainStart,
@@ -337,7 +337,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
           { diameter: element.mainOuterDiameter },
         );
         if (main) meshes.push(main);
-        const branch = this.createCylinderSegment(
+        const branch = this.createTubeSegment(
           element.id,
           "tee-branch",
           element.branchStart,
@@ -348,39 +348,39 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "ARM": {
-        const inlet = this.createCylinderSegment(
+        const inlet = this.createTubeSegment(
           element.id,
           "arm-inlet",
           element.start,
           element.center,
           {
-            diameterBottom: element.inletOuterDiameter,
-            diameterTop: element.inletOuterDiameter,
+            startDiameter: element.inletOuterDiameter,
+            endDiameter: element.inletOuterDiameter,
           },
         );
         if (inlet) meshes.push(inlet);
-        const outlet = this.createCylinderSegment(
+        const outlet = this.createTubeSegment(
           element.id,
           "arm-outlet",
           element.center,
           element.end,
           {
-            diameterBottom: element.outletOuterDiameter,
-            diameterTop: element.outletOuterDiameter,
+            startDiameter: element.outletOuterDiameter,
+            endDiameter: element.outletOuterDiameter,
           },
         );
         if (outlet) meshes.push(outlet);
         break;
       }
       case "RED": {
-        const mesh = this.createCylinderSegment(
+        const mesh = this.createTubeSegment(
           element.id,
           "reducer",
           element.start,
           element.end,
           {
-            diameterBottom: element.inletOuterDiameter,
-            diameterTop: element.outletOuterDiameter,
+            startDiameter: element.inletOuterDiameter,
+            endDiameter: element.outletOuterDiameter,
           },
         );
         if (mesh) meshes.push(mesh);
@@ -390,12 +390,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
     return meshes;
   }
 
-  private createCylinderSegment(
+  private createTubeSegment(
     elementId: string,
     suffix: string,
     start: ResolvedPoint,
     end: ResolvedPoint,
-    options: CylinderOptions,
+    options: TubeOptions,
   ): Mesh | null {
     if (start.kind !== "coordinate" || end.kind !== "coordinate") {
       return null;
@@ -412,36 +412,32 @@ export class BabylonSceneRenderer implements SceneRenderer {
       end.scenePosition.z,
     );
 
-    const delta = endVec.subtract(startVec);
-    const length = delta.length();
-    if (length <= 1e-4) {
-      return null;
+    const path = [startVec, endVec];
+    const startDiameter = Math.max(options.startDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const endDiameter = Math.max(options.endDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const startRadius = startDiameter * 0.5;
+    const endRadius = endDiameter * 0.5;
+
+    const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
+      path,
+      cap: Mesh.CAP_ALL,
+    };
+
+    if (Math.abs(startRadius - endRadius) < 1e-6) {
+      tubeOptions.radius = startRadius;
+    } else {
+      const totalLength = BabylonVector3.Distance(startVec, endVec);
+      const deltaRadius = endRadius - startRadius;
+      tubeOptions.radiusFunction = (_index, distance) => {
+        if (totalLength <= 1e-6) {
+          return startRadius;
+        }
+        const ratio = Math.min(Math.max(distance / totalLength, 0), 1);
+        return startRadius + deltaRadius * ratio;
+      };
     }
 
-    const axis = delta.normalize();
-    const center = startVec.add(delta.scale(0.5));
-
-    const bottom = Math.max(options.diameterBottom ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-    const top = Math.max(options.diameterTop ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-
-    const mesh = MeshBuilder.CreateCylinder(
-      `${elementId}-${suffix}`,
-      {
-        height: length,
-        diameterBottom: bottom,
-        diameterTop: top,
-        // tessellation,
-        //subdivisions: 1,
-        // sideOrientation: Mesh.FRONTSIDE
-      },
-      this.scene,
-    );
-
-    const rotation = new Quaternion();
-    Quaternion.FromUnitVectorsToRef(BabylonVector3.Up(), axis, rotation);
-    mesh.rotationQuaternion = rotation;
-    mesh.position = center;
-
+    const mesh = MeshBuilder.CreateTube(`${elementId}-${suffix}`, tubeOptions, this.scene);
     return this.finalizeMesh(elementId, mesh);
   }
 
