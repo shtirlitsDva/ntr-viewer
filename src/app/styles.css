@@ -115,7 +115,7 @@ body {
 
 .viewer-container {
   flex: 1;
-  background: #0a1018;
+  background: #02040a;
   position: relative;
   min-width: 0;
 }
@@ -129,9 +129,9 @@ body {
 .side-panel {
   width: 320px;
   max-width: 35vw;
-  background: #f5f7fa;
-  color: #1a202c;
-  border-left: 1px solid rgba(15, 20, 27, 0.2);
+  background: #121821;
+  color: #f5f7fa;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
   padding: 1rem;
   display: flex;
   flex-direction: column;
@@ -140,17 +140,18 @@ body {
 }
 
 .panel-section {
-  background: #ffffff;
+  background: rgba(255, 255, 255, 0.04);
   border-radius: 8px;
   padding: 0.75rem;
-  box-shadow: 0 1px 2px rgba(15, 20, 27, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(6px);
 }
 
 .panel-section h2 {
   margin: 0 0 0.5rem;
   font-size: 1rem;
   font-weight: 600;
-  color: #0f141b;
+  color: #e2e8f0;
 }
 
 .panel-section p,
@@ -168,7 +169,7 @@ body {
 
 .detail-label {
   font-weight: 600;
-  color: #2f3b4c;
+  color: #cbd5f5;
 }
 
 .issue-list {
@@ -185,10 +186,10 @@ body {
 .issue-item {
   border-left: 4px solid transparent;
   padding: 0.35rem 0.5rem;
-  background: #edf2f7;
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 4px;
   font-size: 0.9rem;
-  color: #1a202c;
+  color: #f5f7fa;
 }
 
 .issue-item.warning {
@@ -197,12 +198,12 @@ body {
 
 .issue-item.error {
   border-color: #f56565;
-  background: #fed7d7;
+  background: rgba(245, 101, 101, 0.15);
 }
 
 .issue-meta {
   font-size: 0.75rem;
-  color: #4a5568;
+  color: rgba(226, 232, 240, 0.7);
 }
 
 .issue-message {
@@ -211,7 +212,7 @@ body {
 
 .empty-state {
   font-size: 0.9rem;
-  color: rgba(15, 20, 27, 0.65);
+  color: rgba(229, 231, 235, 0.65);
 }
 
 .toast-container {
