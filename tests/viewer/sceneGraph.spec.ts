@@ -19,6 +19,11 @@ describe("buildSceneGraph", () => {
   it("produces scene elements with resolved coordinates and bounds", () => {
     const straight: StraightPipe = {
       kind: "RO",
+      rawFields: {
+        P1: "0,0,0",
+        P2: "5,0,0",
+        DN: "DN150",
+      },
       start: coordinate(0, 0, 0),
       end: coordinate(5, 0, 0),
       nominalDiameter: asNominalDiameterCode("DN150"),
@@ -35,6 +40,15 @@ describe("buildSceneGraph", () => {
 
     const tee: Tee = {
       kind: "TEE",
+      rawFields: {
+        PH1: "5,0,0",
+        PH2: "5,4,0",
+        PA1: "5,2,0",
+        PA2: "5,2,3",
+        DNH: "DN200",
+        DNA: "DN100",
+        TYP: "H",
+      },
       mainStart: coordinate(5, 0, 0),
       mainEnd: coordinate(5, 4, 0),
       branchStart: coordinate(5, 2, 0),
@@ -55,6 +69,14 @@ describe("buildSceneGraph", () => {
 
     const valve: Arm = {
       kind: "ARM",
+      rawFields: {
+        P1: "2,0,0",
+        P2: "2,1,0",
+        PM: "2,0.5,0",
+        DN1: "DN80",
+        DN2: "DN80",
+        GEW: "10",
+      },
       start: coordinate(2, 0, 0),
       end: coordinate(2, 1, 0),
       center: coordinate(2, 0.5, 0),
@@ -74,6 +96,12 @@ describe("buildSceneGraph", () => {
 
     const reducer: Reducer = {
       kind: "RED",
+      rawFields: {
+        P1: "4,4,1",
+        P2: "NODE-1",
+        DN1: "DN200",
+        DN2: "DN150",
+      },
       start: coordinate(4, 4, 1),
       end: createNamedPoint("NODE-1"),
       inletDiameter: asNominalDiameterCode("DN200"),

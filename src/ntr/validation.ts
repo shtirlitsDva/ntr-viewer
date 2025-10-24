@@ -144,6 +144,7 @@ const millimetersSchema = z
 const elementBaseSchema = z
   .object({
     kind: z.enum(["RO", "BOG", "TEE", "ARM", "PROF", "RED"]),
+    rawFields: z.record(z.string(), z.string()).default({}),
     material: materialCodeSchema.optional(),
     loadCases: z.array(loadCaseSchema).default([]),
     description: z.string().trim().min(1).optional(),

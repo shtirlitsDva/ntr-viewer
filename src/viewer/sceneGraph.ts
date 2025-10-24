@@ -145,16 +145,9 @@ export const buildSceneGraph = (file: NtrFile): SceneGraph => {
   };
 };
 
-export const extractElementProperties = (element: Element): Record<string, string> => {
-  const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(element)) {
-    const formatted = formatElementPropertyValue(value);
-    if (formatted !== null) {
-      result[key] = formatted;
-    }
-  }
-  return result;
-};
+export const extractElementProperties = (element: Element): Record<string, string> => ({
+  ...element.rawFields,
+});
 
 const convertElement = (
   element: Element,
@@ -372,69 +365,3 @@ const createBoundsBuilder = (): BoundsBuilder => {
     },
   };
 };
-
-const formatElementPropertyValue = (value: unknown): string | null => {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (Array.isArray(value)) {
-    const formattedItems = value
-      .map((item) => formatElementPropertyValue(item))
-      .filter((item): item is string => item !== null && item.length > 0);
-    if (formattedItems.length === 0) {
-      return null;
-    }
-    return formattedItems.join(", ");
-  }
-
-  if (typeof value === "object") {
-    if (isPointReference(value)) {
-      return formatPointReference(value);
-    }
-    if (isVector3(value)) {
-      return formatVector(value);
-    }
-    const json = JSON.stringify(value);
-    return json === "{}" ? null : json;
-  }
-
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return null;
-    }
-    return value.toString();
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "true" : "false";
-  }
-
-  const text = String(value).trim();
-  return text.length === 0 ? null : text;
-};
-
-const formatPointReference = (value: PointReference): string => {
-  if (value.kind === "coordinate") {
-    return formatVector(value.position);
-  }
-  return `Node ${value.id}`;
-};
-
-const formatVector = (value: Vector3): string =>
-  `(${formatCoordinate(value.x)}, ${formatCoordinate(value.y)}, ${formatCoordinate(value.z)})`;
-
-const formatCoordinate = (value: number): string => value.toFixed(2);
-
-const isPointReference = (value: unknown): value is PointReference =>
-  typeof value === "object" &&
-  value !== null &&
-  "kind" in value &&
-  (value as PointReference).kind !== undefined;
-
-const isVector3 = (value: unknown): value is Vector3 =>
-  typeof value === "object" &&
-  value !== null &&
-  "x" in value &&
-  "y" in value &&
-  "z" in value;

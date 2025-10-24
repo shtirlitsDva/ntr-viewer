@@ -185,6 +185,7 @@ const parseNominalDiameterRecord = (record: RawRecord): Result<NominalDiameterEn
 
 const parseStraightPipe = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const startResult = requirePoint(record, map, "P1");
   if (!startResult.ok) return startResult;
@@ -195,6 +196,7 @@ const parseStraightPipe = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "RO",
+    rawFields,
     start: startResult.value,
     end: endResult.value,
     nominalDiameter: asNominalDiameterCode(dnResult.value.value),
@@ -212,6 +214,7 @@ const parseStraightPipe = (record: RawRecord): Result<Element, ParseIssue> => {
 
 const parseBend = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const startResult = requirePoint(record, map, "P1");
   if (!startResult.ok) return startResult;
@@ -224,6 +227,7 @@ const parseBend = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "BOG",
+    rawFields,
     start: startResult.value,
     end: endResult.value,
     tangent: tangentResult.value,
@@ -242,6 +246,7 @@ const parseBend = (record: RawRecord): Result<Element, ParseIssue> => {
 
 const parseTee = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const mainStart = requirePoint(record, map, "PH1");
   if (!mainStart.ok) return mainStart;
@@ -258,6 +263,7 @@ const parseTee = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "TEE",
+    rawFields,
     mainStart: mainStart.value,
     mainEnd: mainEnd.value,
     branchStart: branchStart.value,
@@ -279,6 +285,7 @@ const parseTee = (record: RawRecord): Result<Element, ParseIssue> => {
 
 const parseArm = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const start = requirePoint(record, map, "P1");
   if (!start.ok) return start;
@@ -296,6 +303,7 @@ const parseArm = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "ARM",
+    rawFields,
     start: start.value,
     end: end.value,
     center: center.value,
@@ -313,6 +321,7 @@ const parseArm = (record: RawRecord): Result<Element, ParseIssue> => {
 
 const parseProfile = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const start = requirePoint(record, map, "P1");
   if (!start.ok) return start;
@@ -328,6 +337,7 @@ const parseProfile = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "PROF",
+    rawFields,
     start: start.value,
     end: end.value,
     profileType: asProfileTypeCode(typ.value.value),
@@ -345,6 +355,7 @@ const parseProfile = (record: RawRecord): Result<Element, ParseIssue> => {
 
 const parseReducer = (record: RawRecord): Result<Element, ParseIssue> => {
   const map = createFieldMap(record);
+  const rawFields = snapshotRawFields(map);
 
   const start = requirePoint(record, map, "P1");
   if (!start.ok) return start;
@@ -357,6 +368,7 @@ const parseReducer = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "RED",
+    rawFields,
     start: start.value,
     end: end.value,
     inletDiameter: asNominalDiameterCode(dn1.value.value),
@@ -379,6 +391,14 @@ const createFieldMap = (record: RawRecord): FieldMap => {
     map.set(field.key, field);
   }
   return map;
+};
+
+const snapshotRawFields = (map: FieldMap): Record<string, string> => {
+  const result: Record<string, string> = {};
+  for (const [key, field] of map.entries()) {
+    result[key] = field.rawValue;
+  }
+  return result;
 };
 
 const requireField = (

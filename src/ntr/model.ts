@@ -37,6 +37,7 @@ export interface ElementBase {
   readonly norm?: NormCode;
   readonly series?: SeriesCode;
   readonly schedule?: ScheduleCode;
+  readonly rawFields: Record<string, string>;
 }
 
 export type ElementKind = "RO" | "BOG" | "TEE" | "ARM" | "PROF" | "RED";
