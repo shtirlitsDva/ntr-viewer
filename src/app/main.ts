@@ -224,10 +224,12 @@ const updateColorModeOptions = (propertyNames: readonly string[]) => {
   const previousMode = currentColorMode;
   colorModeSelect.innerHTML = "";
 
-  addColorModeOption("type", "type");
-  addColorModeOption("material", "material");
+  addColorModeOption("type", "TYPE");
 
   for (const property of propertyNames) {
+    if (property === "MAT") {
+      continue;
+    }
     addColorModeOption(toPropertyColorMode(property), property);
   }
 
