@@ -14,8 +14,15 @@ import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
 import { RevitStylePointerInput } from "./RevitStylePointerInput.ts";
 
-import type { SceneRenderer, SceneRendererFactory, LoadOptions, SelectionListener, ColorMode } from "./engine";
-import type { ResolvedPoint, SceneElement, SceneGraph } from "@viewer/sceneGraph";
+import type {
+  SceneRenderer,
+  SceneRendererFactory,
+  LoadOptions,
+  SelectionListener,
+  ColorMode,
+} from "./engine";
+import { tryGetPropertyFromColorMode } from "./engine";
+import { extractElementProperties, type ResolvedPoint, type SceneElement, type SceneGraph } from "@viewer/sceneGraph";
 
 export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
@@ -58,6 +65,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly elementBaseColor = new Map<string, Color3>();
   private readonly elementMaterials = new Map<string, StandardMaterial>();
   private readonly materialColorCache = new Map<string, Color3>();
+  private readonly elementProperties = new Map<string, Record<string, string>>();
+  private readonly propertyColorCache = new Map<string, Map<string, Color3>>();
   private readonly pointUsage = new Map<string, number>();
   private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
@@ -113,7 +122,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.ground.isPickable = false;
 
     this.scene.onPointerObservable.add((pointerInfo: PointerInfo) => {
-      if (pointerInfo.type !== PointerEventTypes.POINTERUP) {
+      if (pointerInfo.type !== PointerEventTypes.POINTERPICK) {
         return;
       }
       const pick = pointerInfo.pickInfo;
@@ -157,6 +166,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.currentGraph = graph;
     this.sceneOffset = this.computeSceneOffset(graph.bounds);
     this.computePointUsage(graph);
+    this.propertyColorCache.clear();
 
     graph.elements.forEach((element) => {
       const meshes = this.createMeshesForElement(element);
@@ -165,6 +175,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
       this.elementMeshes.set(element.id, meshes);
       this.elementLookup.set(element.id, element);
+      this.elementProperties.set(element.id, extractElementProperties(element.source));
     });
 
     this.updateColors();
@@ -255,6 +266,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
       material.dispose(false, true);
     }
     this.elementMaterials.clear();
+    this.elementProperties.clear();
+    this.propertyColorCache.clear();
   }
 
   private updateGround(bounds: SceneGraph["bounds"]): void {
@@ -585,6 +598,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   private getColorForElement(element: SceneElement): Color3 {
+    const propertyKey = tryGetPropertyFromColorMode(this.colorMode);
+    if (propertyKey) {
+      const properties = this.elementProperties.get(element.id);
+      const value = properties?.[propertyKey] ?? "—";
+      return this.colorForPropertyValue(propertyKey, value);
+    }
     if (this.colorMode === "material" && element.material) {
       return this.colorForMaterial(element.material);
     }
@@ -599,6 +618,30 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const hash = hashString(material);
     const color = colorFromHue(hash % 360);
     this.materialColorCache.set(material, color);
+    return color.clone();
+  }
+
+  private colorForPropertyValue(property: string, value: string): Color3 {
+    let propertyCache = this.propertyColorCache.get(property);
+    if (!propertyCache) {
+      propertyCache = new Map<string, Color3>();
+      this.propertyColorCache.set(property, propertyCache);
+    }
+
+    const cached = propertyCache.get(value);
+    if (cached) {
+      return cached.clone();
+    }
+
+    if (value === "—") {
+      const neutral = new Color3(0.4, 0.4, 0.4);
+      propertyCache.set(value, neutral);
+      return neutral.clone();
+    }
+
+    const hash = hashString(`${property}:${value}`);
+    const color = colorFromHue(hash % 360);
+    propertyCache.set(value, color);
     return color.clone();
   }
 

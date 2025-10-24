@@ -55,6 +55,7 @@ interface SceneElementCommon {
   readonly norm?: NormCode;
   readonly series?: SeriesCode;
   readonly schedule?: ScheduleCode;
+  readonly source: Element;
 }
 
 export interface SceneStraightPipe extends SceneElementCommon {
@@ -144,6 +145,14 @@ export const buildSceneGraph = (file: NtrFile): SceneGraph => {
   };
 };
 
+export const extractElementProperties = (element: Element): Record<string, string> => {
+  const result: Record<string, string> = {};
+  for (const [key, value] of Object.entries(element)) {
+    result[key] = formatElementPropertyValue(value);
+  }
+  return result;
+};
+
 const convertElement = (
   element: Element,
   id: string,
@@ -177,6 +186,7 @@ const baseProps = (id: string, element: Element): SceneElementCommon => ({
   norm: element.norm,
   series: element.series,
   schedule: element.schedule,
+  source: element,
 });
 
 const lookupOuterDiameter = (
@@ -359,3 +369,61 @@ const createBoundsBuilder = (): BoundsBuilder => {
     },
   };
 };
+
+const formatElementPropertyValue = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return "—";
+    }
+    return value.map((item) => formatElementPropertyValue(item)).join(", ");
+  }
+
+  if (typeof value === "object") {
+    if (isPointReference(value)) {
+      return formatPointReference(value);
+    }
+    if (isVector3(value)) {
+      return formatVector(value);
+    }
+    return JSON.stringify(value);
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toString() : "—";
+  }
+
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+
+  return String(value);
+};
+
+const formatPointReference = (value: PointReference): string => {
+  if (value.kind === "coordinate") {
+    return formatVector(value.position);
+  }
+  return `Node ${value.id}`;
+};
+
+const formatVector = (value: Vector3): string =>
+  `(${formatCoordinate(value.x)}, ${formatCoordinate(value.y)}, ${formatCoordinate(value.z)})`;
+
+const formatCoordinate = (value: number): string => value.toFixed(2);
+
+const isPointReference = (value: unknown): value is PointReference =>
+  typeof value === "object" &&
+  value !== null &&
+  "kind" in value &&
+  (value as PointReference).kind !== undefined;
+
+const isVector3 = (value: unknown): value is Vector3 =>
+  typeof value === "object" &&
+  value !== null &&
+  "x" in value &&
+  "y" in value &&
+  "z" in value;

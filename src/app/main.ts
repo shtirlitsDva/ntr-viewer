@@ -9,6 +9,7 @@ import { parseNtr } from "@ntr/parser";
 import type { ParseIssue } from "@ntr/model";
 import {
   buildSceneGraph,
+  extractElementProperties,
   type ResolvedPoint,
   type SceneElement,
   type SceneGraph,
@@ -16,6 +17,7 @@ import {
 import { createBabylonRenderer } from "@viewer/viewer";
 // import { createHighTessellationRenderer } from "@viewer/renderers";
 import type { ColorMode, SceneRenderer } from "@viewer/engine";
+import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
 import { listen } from "@tauri-apps/api/event";
@@ -24,6 +26,8 @@ interface AppState {
   filePath: string | null;
   issues: ParseIssue[];
   graph: SceneGraph | null;
+  propertyNames: string[];
+  elementProperties: Map<string, Record<string, string>>;
 }
 
 let renderer: SceneRenderer | null = null;
@@ -31,6 +35,8 @@ let state: AppState = {
   filePath: null,
   issues: [],
   graph: null,
+  propertyNames: [],
+  elementProperties: new Map(),
 };
 
 let selectionContainer: HTMLElement;
@@ -39,6 +45,8 @@ let filePathLabel: HTMLElement;
 let gridToggle: HTMLInputElement;
 let telemetryToggle: HTMLInputElement;
 let toastContainer: HTMLElement;
+let colorModeSelect: HTMLSelectElement;
+let currentColorMode: ColorMode = "type";
 
 const activeToasts = new Map<string, HTMLElement>();
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
@@ -93,6 +101,27 @@ const getRememberedFile = (): string | null => {
   }
 };
 
+const collectElementPropertyData = (elements: readonly SceneElement[]) => {
+  const propertyNames = new Set<string>();
+  const elementProperties = new Map<string, Record<string, string>>();
+
+  for (const element of elements) {
+    const properties = extractElementProperties(element.source);
+    elementProperties.set(element.id, properties);
+    for (const key of Object.keys(properties)) {
+      if (key === "kind") {
+        continue;
+      }
+      propertyNames.add(key);
+    }
+  }
+
+  return {
+    elementProperties,
+    propertyNames: [...propertyNames].sort((a, b) => a.localeCompare(b)),
+  };
+};
+
 const getCanvas = (): HTMLCanvasElement => {
   const canvas = document.querySelector<HTMLCanvasElement>("#viewer-canvas");
   if (!canvas) {
@@ -106,7 +135,11 @@ const resetViewerState = () => {
     filePath: null,
     issues: [],
     graph: null,
+    propertyNames: [],
+    elementProperties: new Map(),
   };
+  currentColorMode = "type";
+  updateColorModeOptions([]);
   renderer?.load({ elements: [], bounds: null });
   renderer?.setSelection(null);
   renderFilePath(null);
@@ -121,12 +154,14 @@ const initialize = () => {
   gridToggle = queryElement<HTMLInputElement>('[data-control="grid-toggle"]');
   telemetryToggle = queryElement<HTMLInputElement>('[data-control="telemetry-toggle"]');
   toastContainer = queryElement<HTMLElement>('[data-state="toasts"]');
+  colorModeSelect = queryElement<HTMLSelectElement>('[data-control="color-mode"]');
 
   // Swap renderer factories here for experimentation:
   renderer = createBabylonRenderer(getCanvas());
   // renderer = createHighTessellationRenderer(getCanvas());
   renderer.onSelectionChanged(handleSelectionChange);
   renderer.setGridVisible(gridToggle.checked);
+  updateColorModeOptions([]);
 
   setupToolbar();
   setupKeyboardShortcuts();
@@ -159,13 +194,11 @@ const setupToolbar = () => {
     fitToCurrentBounds();
   });
 
-  queryElement<HTMLSelectElement>('[data-control="color-mode"]').addEventListener(
-    "change",
-    (event) => {
-      const select = event.target as HTMLSelectElement;
-      renderer?.setColorMode(select.value as ColorMode);
-    },
-  );
+  colorModeSelect.addEventListener("change", (event) => {
+    const select = event.target as HTMLSelectElement;
+    currentColorMode = select.value as ColorMode;
+    renderer?.setColorMode(currentColorMode);
+  });
 
   gridToggle.addEventListener("change", () => {
     renderer?.setGridVisible(gridToggle.checked);
@@ -183,6 +216,51 @@ const setupToolbar = () => {
     );
   });
 };
+
+const updateColorModeOptions = (propertyNames: readonly string[]) => {
+  if (!colorModeSelect) {
+    return;
+  }
+
+  const previousMode = currentColorMode;
+  colorModeSelect.innerHTML = "";
+
+  addColorModeOption("type", "By Type");
+  addColorModeOption("material", "By Material");
+
+  for (const property of propertyNames) {
+    addColorModeOption(toPropertyColorMode(property), `By ${formatPropertyLabel(property)}`);
+  }
+
+  const validated = ensureValidColorMode(previousMode, propertyNames);
+  currentColorMode = validated;
+  colorModeSelect.value = validated;
+  renderer?.setColorMode(validated);
+};
+
+const addColorModeOption = (value: ColorMode, label: string) => {
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label;
+  colorModeSelect.append(option);
+};
+
+const ensureValidColorMode = (
+  desired: ColorMode,
+  propertyNames: readonly string[],
+): ColorMode => {
+  const property = tryGetPropertyFromColorMode(desired);
+  if (!property) {
+    return desired;
+  }
+  return propertyNames.includes(property) ? desired : "type";
+};
+
+const formatPropertyLabel = (value: string): string =>
+  value
+    .replace(/_/g, " ")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/^./, (char) => char.toUpperCase());
 
 const setupKeyboardShortcuts = () => {
   window.addEventListener("keydown", (event) => {
@@ -272,7 +350,11 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
       filePath: path,
       graph: null,
       issues: [...parseResult.error],
+      propertyNames: [],
+      elementProperties: new Map(),
     };
+    currentColorMode = "type";
+    updateColorModeOptions([]);
     renderer?.load({ elements: [], bounds: null });
     renderer?.setSelection(null);
     renderFilePath(path);
@@ -301,13 +383,17 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
   }
 
   const graph = buildSceneGraph(parseResult.value.file);
+  const propertyData = collectElementPropertyData(graph.elements);
   state = {
     filePath: path,
     graph,
     issues: [...parseResult.value.issues],
+    propertyNames: propertyData.propertyNames,
+    elementProperties: propertyData.elementProperties,
   };
 
   renderer?.load(graph, { maintainCamera: source === "watch" });
+  updateColorModeOptions(state.propertyNames);
   renderer?.setSelection(null);
   renderFilePath(path);
   renderSelection(null);
@@ -492,70 +578,20 @@ const renderSelection = (element: SceneElement | null) => {
 
   appendDetail(list, "Element ID", element.id);
   appendDetail(list, "Type", element.kind);
-  appendOptionalDetail(list, "Description", element.description);
-  appendOptionalDetail(list, "Reference", element.reference);
-  appendOptionalDetail(list, "Component Tag", element.componentTag);
-  appendOptionalDetail(list, "Pipeline", element.pipeline);
-  appendOptionalDetail(list, "Material", element.material);
-  appendOptionalDetail(list, "Norm", element.norm);
-  appendOptionalDetail(list, "Series", element.series);
-  appendOptionalDetail(list, "Schedule", element.schedule);
-  appendDetail(
-    list,
-    "Load Cases",
-    element.loadCases.length ? element.loadCases.join(", ") : "—",
-  );
 
-  switch (element.kind) {
-    case "RO":
-      appendDetail(list, "Nominal Diameter", element.nominalDiameter);
-      appendDetail(list, "Start", formatPoint(element.start));
-      appendDetail(list, "End", formatPoint(element.end));
-      break;
-    case "PROF":
-      appendDetail(list, "Profile", element.profileType);
-      appendDetail(list, "Start", formatPoint(element.start));
-      appendDetail(list, "End", formatPoint(element.end));
-      if (element.axis) {
-        appendDetail(list, "Axis", element.axis);
+  const propertyMap = state.elementProperties.get(element.id);
+  if (propertyMap) {
+    for (const [key, value] of Object.entries(propertyMap)) {
+      if (key === "kind") {
+        continue;
       }
-      if (element.axisDirection) {
-        appendDetail(list, "Axis Direction", formatPoint(element.axisDirection));
-      }
-      break;
-    case "BOG":
-      appendDetail(list, "Nominal Diameter", element.nominalDiameter);
-      appendDetail(list, "Start", formatPoint(element.start));
-      appendDetail(list, "Tangent", formatPoint(element.tangent));
-      appendDetail(list, "End", formatPoint(element.end));
-      break;
-    case "TEE":
-      appendDetail(list, "Main Diameter", element.mainNominalDiameter);
-      appendDetail(list, "Branch Diameter", element.branchNominalDiameter);
-      appendDetail(list, "Main Start", formatPoint(element.mainStart));
-      appendDetail(list, "Main End", formatPoint(element.mainEnd));
-      appendDetail(list, "Branch Start", formatPoint(element.branchStart));
-      appendDetail(list, "Branch End", formatPoint(element.branchEnd));
-      appendOptionalDetail(list, "Tee Type", element.teeType);
-      break;
-    case "ARM":
-      appendDetail(list, "Inlet Diameter", element.inletDiameter);
-      appendDetail(list, "Outlet Diameter", element.outletDiameter);
-      appendDetail(list, "Start", formatPoint(element.start));
-      appendDetail(list, "End", formatPoint(element.end));
-      appendDetail(list, "Center", formatPoint(element.center));
-      if (element.weight !== undefined) {
-        appendDetail(list, "Weight", `${element.weight.toFixed(2)} kg`);
-      }
-      break;
-    case "RED":
-      appendDetail(list, "Inlet Diameter", element.inletDiameter);
-      appendDetail(list, "Outlet Diameter", element.outletDiameter);
-      appendDetail(list, "Start", formatPoint(element.start));
-      appendDetail(list, "End", formatPoint(element.end));
-      break;
-    default:
-      break;
+      appendDetail(list, formatPropertyLabel(key), value);
+    }
+  }
+
+  const derivedDetails = getDerivedDetails(element);
+  for (const [label, value] of derivedDetails) {
+    appendDetail(list, label, value);
   }
 
   selectionContainer.append(list);
@@ -572,15 +608,71 @@ const appendDetail = (list: HTMLDListElement, label: string, value: string) => {
   list.append(term, description);
 };
 
-const appendOptionalDetail = (
-  list: HTMLDListElement,
-  label: string,
-  value: string | undefined,
-) => {
-  if (!value) {
-    return;
+const getDerivedDetails = (element: SceneElement): Array<[string, string]> => {
+  const entries: Array<[string, string]> = [];
+
+  const addResolvedPoint = (label: string, point: ResolvedPoint | null | undefined) => {
+    if (!point || point.kind !== "coordinate") {
+      return;
+    }
+    entries.push([label, formatPoint(point)]);
+  };
+
+  const addDiameter = (label: string, value: number | undefined) => {
+    if (value === undefined) {
+      return;
+    }
+    entries.push([label, `${formatNumber(value)} mm`]);
+  };
+
+  switch (element.kind) {
+    case "RO":
+      addResolvedPoint("Resolved Start", element.start);
+      addResolvedPoint("Resolved End", element.end);
+      addDiameter("Outer Diameter", element.outerDiameter);
+      break;
+    case "PROF":
+      addResolvedPoint("Resolved Start", element.start);
+      addResolvedPoint("Resolved End", element.end);
+      if (element.axisDirection) {
+        addResolvedPoint("Resolved Axis Direction", element.axisDirection);
+      }
+      break;
+    case "BOG":
+      addResolvedPoint("Resolved Start", element.start);
+      addResolvedPoint("Resolved Tangent", element.tangent);
+      addResolvedPoint("Resolved End", element.end);
+      addDiameter("Outer Diameter", element.outerDiameter);
+      break;
+    case "TEE":
+      addResolvedPoint("Resolved Main Start", element.mainStart);
+      addResolvedPoint("Resolved Main End", element.mainEnd);
+      addResolvedPoint("Resolved Branch Start", element.branchStart);
+      addResolvedPoint("Resolved Branch End", element.branchEnd);
+      addDiameter("Main Outer Diameter", element.mainOuterDiameter);
+      addDiameter("Branch Outer Diameter", element.branchOuterDiameter);
+      break;
+    case "ARM":
+      addResolvedPoint("Resolved Start", element.start);
+      addResolvedPoint("Resolved Center", element.center);
+      addResolvedPoint("Resolved End", element.end);
+      addDiameter("Inlet Outer Diameter", element.inletOuterDiameter);
+      addDiameter("Outlet Outer Diameter", element.outletOuterDiameter);
+      if (element.weight !== undefined) {
+        entries.push(["Weight", `${element.weight.toFixed(2)} kg`]);
+      }
+      break;
+    case "RED":
+      addResolvedPoint("Resolved Start", element.start);
+      addResolvedPoint("Resolved End", element.end);
+      addDiameter("Inlet Outer Diameter", element.inletOuterDiameter);
+      addDiameter("Outlet Outer Diameter", element.outletOuterDiameter);
+      break;
+    default:
+      break;
   }
-  appendDetail(list, label, value);
+
+  return entries;
 };
 
 const formatPoint = (point: ResolvedPoint | null | undefined): string => {

@@ -1,6 +1,14 @@
 import type { SceneGraph } from "./sceneGraph";
 
-export type ColorMode = "type" | "material";
+export type ColorMode = "type" | "material" | `property:${string}`;
+
+export const PROPERTY_COLOR_MODE_PREFIX = "property:";
+
+export const toPropertyColorMode = (property: string): ColorMode =>
+  `${PROPERTY_COLOR_MODE_PREFIX}${property}`;
+
+export const tryGetPropertyFromColorMode = (mode: ColorMode): string | null =>
+  mode.startsWith(PROPERTY_COLOR_MODE_PREFIX) ? mode.slice(PROPERTY_COLOR_MODE_PREFIX.length) : null;
 
 export interface LoadOptions {
   readonly maintainCamera?: boolean;
