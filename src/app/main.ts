@@ -10,7 +10,6 @@ import type { ParseIssue } from "@ntr/model";
 import {
   buildSceneGraph,
   extractElementProperties,
-  type ResolvedPoint,
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
@@ -229,7 +228,7 @@ const updateColorModeOptions = (propertyNames: readonly string[]) => {
   addColorModeOption("material", "By Material");
 
   for (const property of propertyNames) {
-    addColorModeOption(toPropertyColorMode(property), `By ${formatPropertyLabel(property)}`);
+    addColorModeOption(toPropertyColorMode(property), `By ${property}`);
   }
 
   const validated = ensureValidColorMode(previousMode, propertyNames);
@@ -255,12 +254,6 @@ const ensureValidColorMode = (
   }
   return propertyNames.includes(property) ? desired : "type";
 };
-
-const formatPropertyLabel = (value: string): string =>
-  value
-    .replace(/_/g, " ")
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/^./, (char) => char.toUpperCase());
 
 const setupKeyboardShortcuts = () => {
   window.addEventListener("keydown", (event) => {
@@ -582,16 +575,11 @@ const renderSelection = (element: SceneElement | null) => {
   const propertyMap = state.elementProperties.get(element.id);
   if (propertyMap) {
     for (const [key, value] of Object.entries(propertyMap)) {
-      if (key === "kind") {
+      if (key === "id" || key === "kind") {
         continue;
       }
-      appendDetail(list, formatPropertyLabel(key), value);
+      appendDetail(list, key, value);
     }
-  }
-
-  const derivedDetails = getDerivedDetails(element);
-  for (const [label, value] of derivedDetails) {
-    appendDetail(list, label, value);
   }
 
   selectionContainer.append(list);
@@ -607,85 +595,6 @@ const appendDetail = (list: HTMLDListElement, label: string, value: string) => {
 
   list.append(term, description);
 };
-
-const getDerivedDetails = (element: SceneElement): Array<[string, string]> => {
-  const entries: Array<[string, string]> = [];
-
-  const addResolvedPoint = (label: string, point: ResolvedPoint | null | undefined) => {
-    if (!point || point.kind !== "coordinate") {
-      return;
-    }
-    entries.push([label, formatPoint(point)]);
-  };
-
-  const addDiameter = (label: string, value: number | undefined) => {
-    if (value === undefined) {
-      return;
-    }
-    entries.push([label, `${formatNumber(value)} mm`]);
-  };
-
-  switch (element.kind) {
-    case "RO":
-      addResolvedPoint("Resolved Start", element.start);
-      addResolvedPoint("Resolved End", element.end);
-      addDiameter("Outer Diameter", element.outerDiameter);
-      break;
-    case "PROF":
-      addResolvedPoint("Resolved Start", element.start);
-      addResolvedPoint("Resolved End", element.end);
-      if (element.axisDirection) {
-        addResolvedPoint("Resolved Axis Direction", element.axisDirection);
-      }
-      break;
-    case "BOG":
-      addResolvedPoint("Resolved Start", element.start);
-      addResolvedPoint("Resolved Tangent", element.tangent);
-      addResolvedPoint("Resolved End", element.end);
-      addDiameter("Outer Diameter", element.outerDiameter);
-      break;
-    case "TEE":
-      addResolvedPoint("Resolved Main Start", element.mainStart);
-      addResolvedPoint("Resolved Main End", element.mainEnd);
-      addResolvedPoint("Resolved Branch Start", element.branchStart);
-      addResolvedPoint("Resolved Branch End", element.branchEnd);
-      addDiameter("Main Outer Diameter", element.mainOuterDiameter);
-      addDiameter("Branch Outer Diameter", element.branchOuterDiameter);
-      break;
-    case "ARM":
-      addResolvedPoint("Resolved Start", element.start);
-      addResolvedPoint("Resolved Center", element.center);
-      addResolvedPoint("Resolved End", element.end);
-      addDiameter("Inlet Outer Diameter", element.inletOuterDiameter);
-      addDiameter("Outlet Outer Diameter", element.outletOuterDiameter);
-      if (element.weight !== undefined) {
-        entries.push(["Weight", `${element.weight.toFixed(2)} kg`]);
-      }
-      break;
-    case "RED":
-      addResolvedPoint("Resolved Start", element.start);
-      addResolvedPoint("Resolved End", element.end);
-      addDiameter("Inlet Outer Diameter", element.inletOuterDiameter);
-      addDiameter("Outlet Outer Diameter", element.outletOuterDiameter);
-      break;
-    default:
-      break;
-  }
-
-  return entries;
-};
-
-const formatPoint = (point: ResolvedPoint | null | undefined): string => {
-  if (!point) {
-    return "—";
-  }
-  if (point.kind === "coordinate") {
-    return `(${formatNumber(point.position.x)}, ${formatNumber(point.position.y)}, ${formatNumber(point.position.z)})`;
-  }
-  return `Node ${point.reference}`;
-};
-
-const formatNumber = (value: number): string => value.toFixed(2);
 
 const getFileName = (path: string): string => {
   const segments = path.split(/[/\\]/);
