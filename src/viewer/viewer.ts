@@ -31,7 +31,7 @@ import {
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
-import { CSG2, InitializeCSG2Async, IsCSG2Ready } from "@babylonjs/core/Meshes/csg2";
+import { CSG2, IsCSG2Ready } from "@babylonjs/core/Meshes/csg2";
 
 export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
@@ -49,19 +49,6 @@ const MSAA_SAMPLES = 4;
 const Z_OFFSET_BUCKETS = 9;
 const Z_OFFSET_STEP = 0.02;
 const ARC_SEGMENT_LENGTH_TARGET = 30;
-let csg2InitPromise: Promise<void> | null = null;
-
-const ensureCsg2Ready = (): void => {
-  if (IsCSG2Ready() || csg2InitPromise) {
-    return;
-  }
-  csg2InitPromise = InitializeCSG2Async().catch((error) => {
-    if (import.meta.env.DEV) {
-      console.warn("[viewer] failed to initialize CSG2", error);
-    }
-    csg2InitPromise = null;
-  });
-};
 interface MeshMetadata {
   elementId?: string;
 }
@@ -102,7 +89,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
-    ensureCsg2Ready();
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
@@ -398,12 +384,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
       case "TEE": {
         const mesh = this.createTeeMesh(element);
-        if (mesh) {
-          meshes.push(mesh);
-        } else {
-          const fallbackMeshes = this.createSegmentedTeeMeshes(element);
-          meshes.push(...fallbackMeshes);
+        if (!mesh) {
+          throw new Error("Failed to generate TEE mesh");
         }
+        meshes.push(mesh);
         break;
       }
       case "ARM": {
@@ -673,10 +657,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   private createTeeMesh(element: SceneTee): Mesh | null {
-    if (!IsCSG2Ready()) {
-      ensureCsg2Ready();
-      return null;
-    }
     if (
       element.mainStart.kind !== "coordinate" ||
       element.mainEnd.kind !== "coordinate" ||
@@ -742,17 +722,16 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
 
-    let mainCSG: CSG2 | null = null;
-    let branchCSG: CSG2 | null = null;
-    let combined: CSG2 | null = null;
-
     try {
-      mainCSG = CSG2.FromMesh(mainTube, false);
-      branchCSG = CSG2.FromMesh(branchTube, false);
-      combined = mainCSG.add(branchCSG);
+      if (!IsCSG2Ready()) {
+        throw new Error("CSG2 not initialized");
+      }
+      const mainCSG = CSG2.FromMesh(mainTube, false);
+      const branchCSG = CSG2.FromMesh(branchTube, false);
+      const combined = mainCSG.add(branchCSG);
       const mesh = combined.toMesh(`${element.id}-tee`, this.scene, {
         centerMesh: false,
-        rebuildNormals: false,
+        rebuildNormals: true,
       });
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
@@ -766,33 +745,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
-      mainCSG?.dispose();
-      branchCSG?.dispose();
-      combined?.dispose();
-      ensureCsg2Ready();
       return null;
     }
-  }
-
-  private createSegmentedTeeMeshes(element: SceneTee): Mesh[] {
-    const meshes: Mesh[] = [];
-    const main = this.createTubeSegment(
-      element.id,
-      "tee-main",
-      element.mainStart,
-      element.mainEnd,
-      { diameter: element.mainOuterDiameter },
-    );
-    if (main) meshes.push(main);
-    const branch = this.createTubeSegment(
-      element.id,
-      "tee-branch",
-      element.branchStart,
-      element.branchEnd,
-      { diameter: element.branchOuterDiameter },
-    );
-    if (branch) meshes.push(branch);
-    return meshes;
   }
 
   private finalizeMesh(elementId: string, mesh: Mesh): Mesh {

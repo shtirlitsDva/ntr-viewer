@@ -20,6 +20,7 @@ import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
 import { listen } from "@tauri-apps/api/event";
+import { InitializeCSG2Async } from "@babylonjs/core/Meshes/csg2";
 
 interface AppState {
   filePath: string | null;
@@ -146,7 +147,8 @@ const resetViewerState = () => {
   renderIssues([]);
 };
 
-const initialize = () => {
+const initialize = async () => {
+  await InitializeCSG2Async();
   selectionContainer = queryElement<HTMLElement>('[data-panel="selection"]');
   issuesList = queryElement<HTMLUListElement>('[data-panel="issues"]');
   filePathLabel = queryElement<HTMLElement>('[data-state="file-path"]');
@@ -640,9 +642,11 @@ const fitToCurrentBounds = () => {
 };
 
 window.addEventListener("DOMContentLoaded", () => {
-  initialize();
-  void setupFileWatchListeners();
-  void restoreLastFile();
+  void (async () => {
+    await initialize();
+    await setupFileWatchListeners();
+    await restoreLastFile();
+  })();
 });
 
 window.addEventListener("beforeunload", () => {
