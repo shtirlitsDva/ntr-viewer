@@ -31,7 +31,7 @@ import {
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
-import { CSG } from "@babylonjs/core/Meshes/csg";
+import { CSG2, InitializeCSG2Async, IsCSG2Ready } from "@babylonjs/core/Meshes/csg2";
 
 export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
@@ -49,6 +49,19 @@ const MSAA_SAMPLES = 4;
 const Z_OFFSET_BUCKETS = 9;
 const Z_OFFSET_STEP = 0.02;
 const ARC_SEGMENT_LENGTH_TARGET = 30;
+let csg2InitPromise: Promise<void> | null = null;
+
+const ensureCsg2Ready = (): void => {
+  if (IsCSG2Ready() || csg2InitPromise) {
+    return;
+  }
+  csg2InitPromise = InitializeCSG2Async().catch((error) => {
+    if (import.meta.env.DEV) {
+      console.warn("[viewer] failed to initialize CSG2", error);
+    }
+    csg2InitPromise = null;
+  });
+};
 interface MeshMetadata {
   elementId?: string;
 }
@@ -89,6 +102,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
+    ensureCsg2Ready();
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
@@ -659,6 +673,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   private createTeeMesh(element: SceneTee): Mesh | null {
+    if (!IsCSG2Ready()) {
+      ensureCsg2Ready();
+      return null;
+    }
     if (
       element.mainStart.kind !== "coordinate" ||
       element.mainEnd.kind !== "coordinate" ||
@@ -724,16 +742,23 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
 
+    let mainCSG: CSG2 | null = null;
+    let branchCSG: CSG2 | null = null;
+    let combined: CSG2 | null = null;
+
     try {
-      const mainCSG = CSG.FromMesh(mainTube);
-      const branchCSG = CSG.FromMesh(branchTube);
-      const combined = mainCSG.union(branchCSG);
-      combined.copyTransformAttributes(mainCSG);
-      const mesh = combined.toMesh(`${element.id}-tee`, undefined, this.scene, false);
-      mesh.forceSharedVertices();
-      mesh.refreshBoundingInfo(true);
+      mainCSG = CSG2.FromMesh(mainTube, false);
+      branchCSG = CSG2.FromMesh(branchTube, false);
+      combined = mainCSG.add(branchCSG);
+      const mesh = combined.toMesh(`${element.id}-tee`, this.scene, {
+        centerMesh: false,
+        rebuildNormals: false,
+      });
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
+      mainCSG.dispose();
+      branchCSG.dispose();
+      combined.dispose();
       return this.finalizeMesh(element.id, mesh);
     } catch (error) {
       if (import.meta.env.DEV) {
@@ -741,6 +766,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
+      mainCSG?.dispose();
+      branchCSG?.dispose();
+      combined?.dispose();
+      ensureCsg2Ready();
       return null;
     }
   }
