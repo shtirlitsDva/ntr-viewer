@@ -693,24 +693,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const mainDiameter = Math.max(element.mainOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
     const branchDiameter = Math.max(element.branchOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
 
-    const mainCapStart = this.shouldCapPoint(element.mainStart);
-    const mainCapEnd = this.shouldCapPoint(element.mainEnd);
-    const branchCapStart = this.shouldCapPoint(element.branchStart);
-    const branchCapEnd = this.shouldCapPoint(element.branchEnd);
-
-    const computeCap = (start: boolean, end: boolean): number => {
-      if (start && end) return Mesh.CAP_ALL;
-      if (start) return Mesh.CAP_START;
-      if (end) return Mesh.CAP_END;
-      return Mesh.NO_CAP;
-    };
-
     const mainTube = MeshBuilder.CreateTube(
       `${element.id}-main-temp`,
       {
         path: [mainStart, mainEnd],
         radius: mainDiameter * 0.5,
-        cap: computeCap(mainCapStart, mainCapEnd),
+        cap: Mesh.CAP_ALL,
       },
       this.scene,
     );
@@ -720,7 +708,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       {
         path: [branchStart, branchEnd],
         radius: branchDiameter * 0.5,
-        cap: computeCap(branchCapStart, branchCapEnd),
+        cap: Mesh.CAP_ALL,
       },
       this.scene,
     );
