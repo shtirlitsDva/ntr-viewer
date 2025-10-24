@@ -514,79 +514,86 @@ export class BabylonSceneRenderer implements SceneRenderer {
       element.start.scenePosition.x,
       element.start.scenePosition.y,
       element.start.scenePosition.z,
-    );
+    ).subtract(this.sceneOffset);
     const endVec = new BabylonVector3(
       element.end.scenePosition.x,
       element.end.scenePosition.y,
       element.end.scenePosition.z,
-    );
+    ).subtract(this.sceneOffset);
     const tangentVec = new BabylonVector3(
       element.tangent.scenePosition.x,
       element.tangent.scenePosition.y,
       element.tangent.scenePosition.z,
-    );
+    ).subtract(this.sceneOffset);
 
-    startVec.subtractInPlace(this.sceneOffset);
-    endVec.subtractInPlace(this.sceneOffset);
-    tangentVec.subtractInPlace(this.sceneOffset);
+    const startDir = BabylonVector3.Normalize(tangentVec.clone().subtract(startVec));
+    const endDir = BabylonVector3.Normalize(endVec.clone().subtract(tangentVec));
 
-    const startToTangent = tangentVec.subtract(startVec);
-    const endToTangent = tangentVec.subtract(endVec);
-
-    if (startToTangent.lengthSquared() < 1e-6 || endToTangent.lengthSquared() < 1e-6) {
+    if (startDir.lengthSquared() < 1e-6 || endDir.lengthSquared() < 1e-6) {
       return null;
     }
 
-    const planeNormal = BabylonVector3.Cross(startToTangent, endToTangent);
+    const planeNormal = BabylonVector3.Cross(startDir, endDir);
     if (planeNormal.lengthSquared() < 1e-6) {
       return null;
     }
     planeNormal.normalize();
 
-    const u = startToTangent.normalize();
-    let v = BabylonVector3.Cross(u, planeNormal);
-    if (v.lengthSquared() < 1e-6) {
+    let radiusDirStart = BabylonVector3.Cross(planeNormal, startDir);
+    if (radiusDirStart.lengthSquared() < 1e-6) {
       return null;
     }
-    v.normalize();
+    radiusDirStart.normalize();
 
-    const startToEnd = endVec.subtract(startVec);
-    const ex = BabylonVector3.Dot(startToEnd, u);
-    let ey = BabylonVector3.Dot(startToEnd, v);
-
-    if (Math.abs(ey) < 1e-6) {
+    let radiusDirEnd = BabylonVector3.Cross(planeNormal, endDir);
+    if (radiusDirEnd.lengthSquared() < 1e-6) {
       return null;
     }
+    radiusDirEnd.normalize();
 
-    if (ey < 0) {
-      v = v.scale(-1);
-      ey = -ey;
-    }
-
-    const elbowRadius = (ex * ex + ey * ey) / (2 * ey);
-    if (!Number.isFinite(elbowRadius) || elbowRadius <= 1e-6) {
+    const delta = endVec.subtract(startVec);
+    const diff = radiusDirStart.subtract(radiusDirEnd);
+    const diffLengthSq = diff.lengthSquared();
+    if (diffLengthSq < 1e-6) {
       return null;
     }
 
-    const center = startVec.add(v.scale(elbowRadius));
-
-    const startOffset = startVec.subtract(center);
-    const endOffset = endVec.subtract(center);
-
-    const startCoordX = BabylonVector3.Dot(startOffset, u);
-    const startCoordY = BabylonVector3.Dot(startOffset, v);
-    const endCoordX = BabylonVector3.Dot(endOffset, u);
-    const endCoordY = BabylonVector3.Dot(endOffset, v);
-
-    let startAngle = Math.atan2(startCoordY, startCoordX);
-    let endAngle = Math.atan2(endCoordY, endCoordX);
-
-    let delta = endAngle - startAngle;
-    if (delta <= 0) {
-      delta += Math.PI * 2;
+    let elbowRadius = BabylonVector3.Dot(delta, diff) / diffLengthSq;
+    if (!Number.isFinite(elbowRadius) || Math.abs(elbowRadius) <= 1e-6) {
+      return null;
     }
 
-    const arcLength = elbowRadius * delta;
+    if (elbowRadius < 0) {
+      elbowRadius = -elbowRadius;
+      radiusDirStart = radiusDirStart.scale(-1);
+      radiusDirEnd = radiusDirEnd.scale(-1);
+    }
+
+    const center = startVec.add(radiusDirStart.scale(elbowRadius));
+
+    const startOffset = startVec.clone().subtract(center);
+    const endOffset = endVec.clone().subtract(center);
+
+    const measuredRadius = startOffset.length();
+    if (measuredRadius <= 1e-6) {
+      return null;
+    }
+
+    const axisX = startOffset.scale(1 / measuredRadius);
+    let axisY = BabylonVector3.Cross(planeNormal, axisX);
+    if (axisY.lengthSquared() < 1e-6) {
+      return null;
+    }
+    axisY.normalize();
+
+    const endX = BabylonVector3.Dot(endOffset, axisX);
+    const endY = BabylonVector3.Dot(endOffset, axisY);
+    let endAngle = Math.atan2(endY, endX);
+    if (endAngle <= 0) {
+      endAngle += Math.PI * 2;
+    }
+
+    const arcLength = measuredRadius * endAngle;
     const segmentCount = Math.max(
       12,
       Math.min(128, Math.ceil(arcLength / ARC_SEGMENT_LENGTH_TARGET)),
@@ -594,11 +601,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     const path: BabylonVector3[] = [];
     for (let i = 0; i <= segmentCount; i += 1) {
-      const t = i / segmentCount;
-      const angle = startAngle + delta * t;
-      const uComponent = u.scale(Math.cos(angle) * elbowRadius);
-      const vComponent = v.scale(Math.sin(angle) * elbowRadius);
-      path.push(center.add(uComponent).add(vComponent));
+      const angle = endAngle * (i / segmentCount);
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const point = center
+        .add(axisX.scale(cos * measuredRadius))
+        .add(axisY.scale(sin * measuredRadius));
+      path.push(point);
     }
 
     if (path.length >= 2) {
