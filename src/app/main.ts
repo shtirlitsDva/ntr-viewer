@@ -224,11 +224,11 @@ const updateColorModeOptions = (propertyNames: readonly string[]) => {
   const previousMode = currentColorMode;
   colorModeSelect.innerHTML = "";
 
-  addColorModeOption("type", "By Type");
-  addColorModeOption("material", "By Material");
+  addColorModeOption("type", "type");
+  addColorModeOption("material", "material");
 
   for (const property of propertyNames) {
-    addColorModeOption(toPropertyColorMode(property), `By ${property}`);
+    addColorModeOption(toPropertyColorMode(property), property);
   }
 
   const validated = ensureValidColorMode(previousMode, propertyNames);
