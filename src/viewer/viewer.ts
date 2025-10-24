@@ -46,8 +46,6 @@ export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
 const MSAA_SAMPLES = 4;
-const Z_OFFSET_BUCKETS = 9;
-const Z_OFFSET_STEP = 0.02;
 const ARC_SEGMENT_LENGTH_TARGET = 30;
 interface MeshMetadata {
   elementId?: string;
@@ -754,17 +752,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!material) {
       material = new StandardMaterial(`${elementId}-material`, this.scene);
       material.specularColor = Color3.Black();
-      material.zOffset = this.getZOffsetForElement(elementId);
-      material.zOffsetUnits = 0;
       this.elementMaterials.set(elementId, material);
     }
     return material;
-  }
-
-  private getZOffsetForElement(elementId: string): number {
-    const bucket = hashString(elementId) % Z_OFFSET_BUCKETS;
-    const centered = bucket - Math.floor(Z_OFFSET_BUCKETS / 2);
-    return centered * Z_OFFSET_STEP;
   }
 
   private computePointUsage(graph: SceneGraph): void {
