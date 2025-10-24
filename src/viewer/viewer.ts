@@ -713,22 +713,91 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
 
+    const mainDir = mainEnd.clone().subtract(mainStart);
+    const mainDirLength = mainDir.length();
+    if (mainDirLength > 1e-6) {
+      mainDir.scaleInPlace(1 / mainDirLength);
+    }
+    const branchDir = branchEnd.clone().subtract(branchStart);
+    const branchDirLength = branchDir.length();
+    if (branchDirLength > 1e-6) {
+      branchDir.scaleInPlace(1 / branchDirLength);
+    }
+
+    const openPorts: Array<{ center: BabylonVector3; direction: BabylonVector3; diameter: number }> = [];
+    const mainCapStart = this.shouldCapPoint(element.mainStart);
+    const mainCapEnd = this.shouldCapPoint(element.mainEnd);
+    const branchCapStart = this.shouldCapPoint(element.branchStart);
+    const branchCapEnd = this.shouldCapPoint(element.branchEnd);
+
+    if (!mainCapStart && mainDirLength > 1e-6) {
+      openPorts.push({
+        center: mainStart.clone(),
+        direction: mainStart.clone().subtract(mainEnd).normalize(),
+        diameter: mainDiameter,
+      });
+    }
+    if (!mainCapEnd && mainDirLength > 1e-6) {
+      openPorts.push({
+        center: mainEnd.clone(),
+        direction: mainDir.clone(),
+        diameter: mainDiameter,
+      });
+    }
+    if (!branchCapStart && branchDirLength > 1e-6) {
+      openPorts.push({
+        center: branchStart.clone(),
+        direction: branchStart.clone().subtract(branchEnd).normalize(),
+        diameter: branchDiameter,
+      });
+    }
+    if (!branchCapEnd && branchDirLength > 1e-6) {
+      openPorts.push({
+        center: branchEnd.clone(),
+        direction: branchDir.clone(),
+        diameter: branchDiameter,
+      });
+    }
+
     try {
       if (!IsCSG2Ready()) {
         throw new Error("CSG2 not initialized");
       }
-      const mainCSG = CSG2.FromMesh(mainTube, false);
+      let combined = CSG2.FromMesh(mainTube, false);
       const branchCSG = CSG2.FromMesh(branchTube, false);
-      const combined = mainCSG.add(branchCSG);
+      combined = combined.add(branchCSG);
+      branchCSG.dispose();
+
+      for (const port of openPorts) {
+        if (port.direction.lengthSquared() < 1e-6) {
+          continue;
+        }
+        const cutterHeight = port.diameter * 1.2;
+        const half = port.direction.clone().scale(cutterHeight * 0.5);
+        const cutterPath = [port.center.clone().subtract(half), port.center.clone().add(half)];
+        const cutterMesh = MeshBuilder.CreateTube(
+          `${element.id}-tee-cutter`,
+          { path: cutterPath, radius: port.diameter * 0.505, cap: Mesh.CAP_ALL },
+          this.scene,
+        );
+        try {
+          const cutterCSG = CSG2.FromMesh(cutterMesh, false);
+          const updated = combined.subtract(cutterCSG);
+          cutterCSG.dispose();
+          combined.dispose();
+          combined = updated;
+        } finally {
+          cutterMesh.dispose(false, true);
+        }
+      }
+
       const mesh = combined.toMesh(`${element.id}-tee`, this.scene, {
         centerMesh: false,
         rebuildNormals: true,
       });
+      combined.dispose();
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
-      mainCSG.dispose();
-      branchCSG.dispose();
-      combined.dispose();
       return this.finalizeMesh(element.id, mesh);
     } catch (error) {
       if (import.meta.env.DEV) {
