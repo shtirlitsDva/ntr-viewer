@@ -20,18 +20,31 @@
         <button type="button" data-action="reset-view" class="toolbar-button">
           Reset (R)
         </button>
-        <label class="toolbar-field">
+        <label class="toolbar-field" for="color-mode-select">
           Color Mode
-          <select data-control="color-mode">
+          <select id="color-mode-select" name="color-mode" data-control="color-mode">
             <option value="type">By Type</option>
             <option value="material">By Material</option>
           </select>
         </label>
         <label class="toolbar-field">
-          <input type="checkbox" data-control="grid-toggle" checked /> Grid (G)
+          <input
+            id="grid-toggle"
+            name="grid-toggle"
+            type="checkbox"
+            data-control="grid-toggle"
+            checked
+          />
+          Grid (G)
         </label>
         <label class="toolbar-field">
-          <input type="checkbox" data-control="telemetry-toggle" /> Share anonymous usage
+          <input
+            id="telemetry-toggle"
+            name="telemetry-toggle"
+            type="checkbox"
+            data-control="telemetry-toggle"
+          />
+          Share anonymous usage
         </label>
         <span class="file-path" data-state="file-path"></span>
       </header>
