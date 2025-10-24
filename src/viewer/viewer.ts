@@ -722,31 +722,43 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
 
+    let resultMesh: Mesh | null = null;
+    let mainCSG: CSG2 | null = null;
+    let branchCSG: CSG2 | null = null;
+    let branchTrimmed: CSG2 | null = null;
+    let combined: CSG2 | null = null;
+
     try {
       if (!IsCSG2Ready()) {
         throw new Error("CSG2 not initialized");
       }
-      const mainCSG = CSG2.FromMesh(mainTube, false);
-      const branchCSG = CSG2.FromMesh(branchTube, false);
-      const combined = mainCSG.add(branchCSG);
-      const mesh = combined.toMesh(`${element.id}-tee`, this.scene, {
+      mainCSG = CSG2.FromMesh(mainTube, false);
+      branchCSG = CSG2.FromMesh(branchTube, false);
+      branchTrimmed = branchCSG.subtract(mainCSG);
+      combined = mainCSG.add(branchTrimmed);
+      resultMesh = combined.toMesh(`${element.id}-tee`, this.scene, {
         centerMesh: false,
         rebuildNormals: true,
       });
-      mainTube.dispose(false, true);
-      branchTube.dispose(false, true);
-      mainCSG.dispose();
-      branchCSG.dispose();
-      combined.dispose();
-      return this.finalizeMesh(element.id, mesh);
     } catch (error) {
       if (import.meta.env.DEV) {
-        console.warn("[viewer] failed to generate tee mesh via CSG", error);
+        console.warn("[viewer] failed to generate tee mesh via CSG2", error);
       }
+      resultMesh = null;
+    } finally {
       mainTube.dispose(false, true);
       branchTube.dispose(false, true);
+      branchTrimmed?.dispose();
+      branchCSG?.dispose();
+      combined?.dispose();
+      mainCSG?.dispose();
+    }
+
+    if (!resultMesh) {
       return null;
     }
+
+    return this.finalizeMesh(element.id, resultMesh);
   }
 
   private finalizeMesh(elementId: string, mesh: Mesh): Mesh {
