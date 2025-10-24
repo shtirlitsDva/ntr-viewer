@@ -46,7 +46,6 @@ export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
 const MSAA_SAMPLES = 4;
-const ARC_SEGMENT_LENGTH_TARGET = 30;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -374,9 +373,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
         const mesh = this.createBendMesh(element);
         if (mesh) {
           meshes.push(mesh);
-        } else {
-          const fallbackMeshes = this.createSegmentedBendMeshes(element);
-          meshes.push(...fallbackMeshes);
         }
         break;
       }
@@ -489,150 +485,130 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   private createBendMesh(element: SceneBend): Mesh | null {
-    if (
-      element.start.kind !== "coordinate" ||
-      element.end.kind !== "coordinate" ||
-      element.tangent.kind !== "coordinate"
-    ) {
-      return null;
-    }
-
-    const startVec = new BabylonVector3(
-      element.start.scenePosition.x,
-      element.start.scenePosition.y,
-      element.start.scenePosition.z,
-    ).subtract(this.sceneOffset);
-    const endVec = new BabylonVector3(
-      element.end.scenePosition.x,
-      element.end.scenePosition.y,
-      element.end.scenePosition.z,
-    ).subtract(this.sceneOffset);
-    const tangentVec = new BabylonVector3(
-      element.tangent.scenePosition.x,
-      element.tangent.scenePosition.y,
-      element.tangent.scenePosition.z,
-    ).subtract(this.sceneOffset);
-
-    const startDir = BabylonVector3.Normalize(tangentVec.clone().subtract(startVec));
-    const endDir = BabylonVector3.Normalize(endVec.clone().subtract(tangentVec));
-
-    if (startDir.lengthSquared() < 1e-6 || endDir.lengthSquared() < 1e-6) {
-      return null;
-    }
-
-    const planeNormal = BabylonVector3.Cross(startDir, endDir);
-    if (planeNormal.lengthSquared() < 1e-6) {
-      return null;
-    }
-    planeNormal.normalize();
-
-    let radiusDirStart = BabylonVector3.Cross(planeNormal, startDir);
-    if (radiusDirStart.lengthSquared() < 1e-6) {
-      return null;
-    }
-    radiusDirStart.normalize();
-
-    let radiusDirEnd = BabylonVector3.Cross(planeNormal, endDir);
-    if (radiusDirEnd.lengthSquared() < 1e-6) {
-      return null;
-    }
-    radiusDirEnd.normalize();
-
-    const delta = endVec.subtract(startVec);
-    const diff = radiusDirStart.subtract(radiusDirEnd);
-    const diffLengthSq = diff.lengthSquared();
-    if (diffLengthSq < 1e-6) {
-      return null;
-    }
-
-    let elbowRadius = BabylonVector3.Dot(delta, diff) / diffLengthSq;
-    if (!Number.isFinite(elbowRadius) || Math.abs(elbowRadius) <= 1e-6) {
-      return null;
-    }
-
-    if (elbowRadius < 0) {
-      elbowRadius = -elbowRadius;
-      radiusDirStart = radiusDirStart.scale(-1);
-      radiusDirEnd = radiusDirEnd.scale(-1);
-    }
-
-    const center = startVec.add(radiusDirStart.scale(elbowRadius));
-
-    const startOffset = startVec.clone().subtract(center);
-    const endOffset = endVec.clone().subtract(center);
-
-    const measuredRadius = startOffset.length();
-    if (measuredRadius <= 1e-6) {
-      return null;
-    }
-
-    const axisX = startOffset.scale(1 / measuredRadius);
-    let axisY = BabylonVector3.Cross(planeNormal, axisX);
-    if (axisY.lengthSquared() < 1e-6) {
-      return null;
-    }
-    axisY.normalize();
-
-    const endX = BabylonVector3.Dot(endOffset, axisX);
-    const endY = BabylonVector3.Dot(endOffset, axisY);
-    let endAngle = Math.atan2(endY, endX);
-    if (endAngle <= 0) {
-      endAngle += Math.PI * 2;
-    }
-
-    const arcLength = measuredRadius * endAngle;
-    const segmentCount = Math.max(
-      12,
-      Math.min(128, Math.ceil(arcLength / ARC_SEGMENT_LENGTH_TARGET)),
-    );
-
-    const path: BabylonVector3[] = [];
-    for (let i = 0; i <= segmentCount; i += 1) {
-      const angle = endAngle * (i / segmentCount);
-      const cos = Math.cos(angle);
-      const sin = Math.sin(angle);
-      const point = center
-        .add(axisX.scale(cos * measuredRadius))
-        .add(axisY.scale(sin * measuredRadius));
-      path.push(point);
-    }
-
-    if (path.length >= 2) {
-      path[0] = startVec.clone();
-      path[path.length - 1] = endVec.clone();
-    }
-
-    const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-    const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
-      path,
-      cap: Mesh.CAP_ALL,
-      radius: pipeDiameter * 0.5,
-    };
-
-    const mesh = MeshBuilder.CreateTube(`${element.id}-elbow`, tubeOptions, this.scene);
-    return this.finalizeMesh(element.id, mesh);
+  if (
+    element.start.kind !== "coordinate" ||
+    element.end.kind !== "coordinate" ||
+    element.tangent.kind !== "coordinate"
+  ) {
+    return null;
   }
 
-  private createSegmentedBendMeshes(element: SceneBend): Mesh[] {
-    const meshes: Mesh[] = [];
-    const first = this.createTubeSegment(
-      element.id,
-      "bend-segment-1",
-      element.start,
-      element.tangent,
-      { diameter: element.outerDiameter },
-    );
-    if (first) meshes.push(first);
-    const second = this.createTubeSegment(
-      element.id,
-      "bend-segment-2",
-      element.tangent,
-      element.end,
-      { diameter: element.outerDiameter },
-    );
-    if (second) meshes.push(second);
-    return meshes;
+  // Inputs in scene space
+  const startVec = new BabylonVector3(
+    element.start.scenePosition.x,
+    element.start.scenePosition.y,
+    element.start.scenePosition.z,
+  ).subtract(this.sceneOffset);
+
+  const endVec = new BabylonVector3(
+    element.end.scenePosition.x,
+    element.end.scenePosition.y,
+    element.end.scenePosition.z,
+  ).subtract(this.sceneOffset);
+
+  const tangentVec = new BabylonVector3(
+    element.tangent.scenePosition.x,
+    element.tangent.scenePosition.y,
+    element.tangent.scenePosition.z,
+  ).subtract(this.sceneOffset);
+
+  // Tangent directions at ends (S→I, I→E)
+  const startDir = BabylonVector3.Normalize(tangentVec.clone().subtract(startVec));
+  const endDir   = BabylonVector3.Normalize(endVec.clone().subtract(tangentVec));
+  if (startDir.lengthSquared() < 1e-6 || endDir.lengthSquared() < 1e-6) return null;
+
+  // Choose stub length (mm) and clamp so it never exceeds available straight
+  const STUB_MM = 5;
+  const distS = BabylonVector3.Distance(startVec, tangentVec);
+  const distE = BabylonVector3.Distance(endVec, tangentVec);
+  const stub = Math.max(0, Math.min(STUB_MM, distS * 0.49, distE * 0.49));
+
+  // Moved endpoints (sp', ep')
+  const startPrime = startVec.add(startDir.scale(stub));       // toward intersection
+  const endPrime   = endVec.subtract(endDir.scale(stub));       // toward intersection
+
+  // Arc plane
+  const planeNormal = BabylonVector3.Cross(startDir, endDir);
+  if (planeNormal.lengthSquared() < 1e-6) return null;
+  planeNormal.normalize();
+
+  // Radius directions at S/E
+  let radiusDirStart = BabylonVector3.Cross(planeNormal, startDir);
+  let radiusDirEnd   = BabylonVector3.Cross(planeNormal, endDir);
+  if (radiusDirStart.lengthSquared() < 1e-6 || radiusDirEnd.lengthSquared() < 1e-6) return null;
+  radiusDirStart.normalize();
+  radiusDirEnd.normalize();
+
+  // Solve circle radius from sp', ep'
+  const delta = endPrime.subtract(startPrime);
+  const diff = radiusDirStart.subtract(radiusDirEnd);
+  const diffLengthSq = diff.lengthSquared();
+  if (diffLengthSq < 1e-6) return null;
+
+  let elbowRadius = BabylonVector3.Dot(delta, diff) / diffLengthSq;
+  if (!Number.isFinite(elbowRadius) || Math.abs(elbowRadius) <= 1e-6) return null;
+
+  if (elbowRadius < 0) {
+    elbowRadius = -elbowRadius;
+    radiusDirStart = radiusDirStart.scale(-1);
+    radiusDirEnd = radiusDirEnd.scale(-1);
   }
+
+  const center = startPrime.add(radiusDirStart.scale(elbowRadius));
+
+  // Local frame from sp' on the circle
+  const startOffset = startPrime.clone().subtract(center);
+  const endOffset = endPrime.clone().subtract(center);
+
+  const measuredRadius = startOffset.length();
+  if (measuredRadius <= 1e-6) return null;
+
+  const axisX = startOffset.scale(1 / measuredRadius);
+  let axisY = BabylonVector3.Cross(planeNormal, axisX);
+  if (axisY.lengthSquared() < 1e-6) return null;
+  axisY.normalize();
+
+  // Angle sp' → ep'
+  const endX = BabylonVector3.Dot(endOffset, axisX);
+  const endY = BabylonVector3.Dot(endOffset, axisY);
+  let endAngle = Math.atan2(endY, endX);
+  if (endAngle <= 0) endAngle += Math.PI * 2;
+
+  // Sampling
+  const ARC_SEGMENT_LENGTH_TARGET = 20; // keep your project-level constant if you have one
+  const arcLength = measuredRadius * endAngle;
+  const segmentCount = Math.max(12, Math.min(128, Math.ceil(arcLength / ARC_SEGMENT_LENGTH_TARGET)));
+
+  // Build path: [S, S'], arc(sp'..ep'), [E', E]
+  const path: BabylonVector3[] = [];
+  path.push(startVec.clone());                 // exact start
+  path.push(startPrime.clone());               // start stub
+
+  // interior arc points (skip endpoints, they are startPrime and endPrime)
+  for (let i = 1; i < segmentCount; i += 1) {
+    const angle = endAngle * (i / segmentCount);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const point = center
+      .add(axisX.scale(cos * measuredRadius))
+      .add(axisY.scale(sin * measuredRadius));
+    path.push(point);
+  }
+
+  path.push(endPrime.clone());                 // end stub start
+  path.push(endVec.clone());                   // exact end
+
+  // Tube options: leave ends open to butt to straights
+  const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+  const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
+    path,
+    cap: Mesh.NO_CAP,                          // important for clean butt joints
+    radius: pipeDiameter * 0.5,
+  };
+
+  const mesh = MeshBuilder.CreateTube(`${element.id}-elbow`, tubeOptions, this.scene);
+  return this.finalizeMesh(element.id, mesh);
+}
 
   private createTeeMesh(element: SceneTee): Mesh | null {
     if (
