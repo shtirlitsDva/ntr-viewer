@@ -89,7 +89,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
     this.canvas = canvas;
-    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: true, stencil: true }, true);
+    this.engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false }, false);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
 
