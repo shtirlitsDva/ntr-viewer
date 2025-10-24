@@ -148,7 +148,10 @@ export const buildSceneGraph = (file: NtrFile): SceneGraph => {
 export const extractElementProperties = (element: Element): Record<string, string> => {
   const result: Record<string, string> = {};
   for (const [key, value] of Object.entries(element)) {
-    result[key] = formatElementPropertyValue(value);
+    const formatted = formatElementPropertyValue(value);
+    if (formatted !== null) {
+      result[key] = formatted;
+    }
   }
   return result;
 };
@@ -370,16 +373,19 @@ const createBoundsBuilder = (): BoundsBuilder => {
   };
 };
 
-const formatElementPropertyValue = (value: unknown): string => {
+const formatElementPropertyValue = (value: unknown): string | null => {
   if (value === null || value === undefined) {
-    return "—";
+    return null;
   }
 
   if (Array.isArray(value)) {
-    if (value.length === 0) {
-      return "—";
+    const formattedItems = value
+      .map((item) => formatElementPropertyValue(item))
+      .filter((item): item is string => item !== null && item.length > 0);
+    if (formattedItems.length === 0) {
+      return null;
     }
-    return value.map((item) => formatElementPropertyValue(item)).join(", ");
+    return formattedItems.join(", ");
   }
 
   if (typeof value === "object") {
@@ -389,18 +395,23 @@ const formatElementPropertyValue = (value: unknown): string => {
     if (isVector3(value)) {
       return formatVector(value);
     }
-    return JSON.stringify(value);
+    const json = JSON.stringify(value);
+    return json === "{}" ? null : json;
   }
 
   if (typeof value === "number") {
-    return Number.isFinite(value) ? value.toString() : "—";
+    if (!Number.isFinite(value)) {
+      return null;
+    }
+    return value.toString();
   }
 
   if (typeof value === "boolean") {
     return value ? "true" : "false";
   }
 
-  return String(value);
+  const text = String(value).trim();
+  return text.length === 0 ? null : text;
 };
 
 const formatPointReference = (value: PointReference): string => {
