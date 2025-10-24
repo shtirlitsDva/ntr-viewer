@@ -227,9 +227,6 @@ const updateColorModeOptions = (propertyNames: readonly string[]) => {
   addColorModeOption("type", "TYPE");
 
   for (const property of propertyNames) {
-    if (property === "MAT") {
-      continue;
-    }
     addColorModeOption(toPropertyColorMode(property), property);
   }
 
