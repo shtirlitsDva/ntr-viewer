@@ -130,7 +130,19 @@ export class BabylonSceneRenderer implements SceneRenderer {
         return;
       }
 
-      const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+      const pickResult = pointerInfo.pickInfo;
+      if (import.meta.env.DEV) {
+        console.debug(
+          "[viewer] pointer down",
+          {
+            hit: pickResult?.hit ?? false,
+            mesh: pickResult?.pickedMesh?.name ?? null,
+            elementId: (pickResult?.pickedMesh?.metadata as MeshMetadata | undefined)?.elementId ?? null,
+            pointerX: this.scene.pointerX,
+            pointerY: this.scene.pointerY,
+          },
+        );
+      }
       const metadata = pickResult?.pickedMesh?.metadata as MeshMetadata | undefined;
       if (pickResult?.hit && metadata?.elementId) {
         this.setSelection(metadata.elementId);
