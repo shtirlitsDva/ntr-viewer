@@ -57,8 +57,6 @@ interface TubeOptions {
   readonly endDiameter?: number;
 }
 
-type CoordinatePoint = Extract<ResolvedPoint, { kind: "coordinate" }>;
-
 export interface BabylonRendererOptions {}
 
 export class BabylonSceneRenderer implements SceneRenderer {
@@ -75,7 +73,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly materialColorCache = new Map<string, Color3>();
   private readonly elementProperties = new Map<string, Record<string, string>>();
   private readonly propertyColorCache = new Map<string, Map<string, Color3>>();
-  private readonly pointUsage = new Map<string, number>();
   private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
   private wheelHandler: ((event: WheelEvent) => void) | null = null;
@@ -190,7 +187,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.clearElements();
     this.currentGraph = graph;
     this.sceneOffset = this.computeSceneOffset(graph.bounds);
-    this.computePointUsage(graph);
     this.propertyColorCache.clear();
 
     graph.elements.forEach((element) => {
@@ -469,21 +465,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const startRadius = startDiameter * 0.5;
     const endRadius = endDiameter * 0.5;
 
-    const capStart = this.shouldCapPoint(start);
-    const capEnd = this.shouldCapPoint(end);
-
-    let capOption = Mesh.NO_CAP;
-    if (capStart && capEnd) {
-      capOption = Mesh.CAP_ALL;
-    } else if (capStart) {
-      capOption = Mesh.CAP_START;
-    } else if (capEnd) {
-      capOption = Mesh.CAP_END;
-    }
-
     const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
       path,
-      cap: capOption,
+      cap: Mesh.CAP_ALL,
     };
 
     if (Math.abs(startRadius - endRadius) < 1e-6) {
@@ -618,21 +602,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       path[path.length - 1] = endVec.clone();
     }
 
-    const capStart = this.shouldCapPoint(element.start);
-    const capEnd = this.shouldCapPoint(element.end);
-    let capOption = Mesh.NO_CAP;
-    if (capStart && capEnd) {
-      capOption = Mesh.CAP_ALL;
-    } else if (capStart) {
-      capOption = Mesh.CAP_START;
-    } else if (capEnd) {
-      capOption = Mesh.CAP_END;
-    }
-
     const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
     const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
       path,
-      cap: capOption,
+      cap: Mesh.CAP_ALL,
       radius: pipeDiameter * 0.5,
     };
 
@@ -759,67 +732,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.elementMaterials.set(elementId, material);
     }
     return material;
-  }
-
-  private computePointUsage(graph: SceneGraph): void {
-    this.pointUsage.clear();
-    for (const element of graph.elements) {
-      switch (element.kind) {
-        case "RO":
-          this.accumulatePoint(element.start);
-          this.accumulatePoint(element.end);
-          break;
-        case "PROF":
-          this.accumulatePoint(element.start);
-          this.accumulatePoint(element.end);
-          if (element.axisDirection) {
-            this.accumulatePoint(element.axisDirection);
-          }
-          break;
-        case "BOG":
-          this.accumulatePoint(element.start);
-          this.accumulatePoint(element.tangent);
-          this.accumulatePoint(element.end);
-          break;
-        case "TEE":
-          this.accumulatePoint(element.mainStart);
-          this.accumulatePoint(element.mainEnd);
-          this.accumulatePoint(element.branchStart);
-          this.accumulatePoint(element.branchEnd);
-          break;
-        case "ARM":
-          this.accumulatePoint(element.start);
-          this.accumulatePoint(element.center);
-          this.accumulatePoint(element.end);
-          break;
-        case "RED":
-          this.accumulatePoint(element.start);
-          this.accumulatePoint(element.end);
-          break;
-      }
-    }
-  }
-
-  private accumulatePoint(point: ResolvedPoint | undefined | null): void {
-    if (!point || point.kind !== "coordinate") {
-      return;
-    }
-    const key = this.getPointKey(point);
-    const current = this.pointUsage.get(key) ?? 0;
-    this.pointUsage.set(key, current + 1);
-  }
-
-  private getPointKey(point: CoordinatePoint): string {
-    const { x, y, z } = point.scenePosition;
-    return `${x.toFixed(4)}|${y.toFixed(4)}|${z.toFixed(4)}`;
-  }
-
-  private shouldCapPoint(point: ResolvedPoint): boolean {
-    if (point.kind !== "coordinate") {
-      return false;
-    }
-    const key = this.getPointKey(point);
-    return (this.pointUsage.get(key) ?? 0) <= 1;
   }
 
   private initializeMouseWheelZoom(): void {
