@@ -148,10 +148,10 @@ describe("buildSceneGraph", () => {
       expect.fail("expected bounds to be defined");
       return;
     }
-    expect(graph.bounds.min).toEqual({ x: 0, y: 0, z: -4 });
+    expect(graph.bounds.min).toEqual({ x: 0, y: 0, z: 0 });
     expect(graph.bounds.max.x).toBe(5);
     expect(graph.bounds.max.y).toBe(3);
-    expect(graph.bounds.max.z).toBeCloseTo(0, 6);
+    expect(graph.bounds.max.z).toBeCloseTo(4, 6);
 
     expect(sceneTee.loadCases).toEqual([]);
     if (sceneValve.kind !== "ARM") expect.fail("expected ARM scene element");

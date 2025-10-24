@@ -602,7 +602,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
   const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
     path,
-    cap: Mesh.NO_CAP,                          // important for clean butt joints
+    cap: Mesh.CAP_ALL,                          // important for clean butt joints
     radius: pipeDiameter * 0.5,
   };
 
