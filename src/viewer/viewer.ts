@@ -206,6 +206,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.updateColors();
     this.applySelectionColors();
     this.updateGround(graph.bounds);
+    this.updateCameraClipping(graph.bounds);
     if (!options.maintainCamera) {
       this.fitToBounds(graph.bounds);
     }
@@ -245,6 +246,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.updateCameraClipping(bounds);
       return;
     }
 
@@ -252,6 +254,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!adjusted) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.updateCameraClipping(bounds);
       return;
     }
 
@@ -266,12 +269,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const spanZ = adjusted.max.z - adjusted.min.z;
     const maxSpan = Math.max(spanX, spanY, spanZ, 1);
     const radius = maxSpan * 1.5;
-    const farPlane = Math.max(maxSpan * 20, 10_000);
+    const farPlane = Math.max(maxSpan * 4, radius * 2);
 
     this.camera.target = center;
     this.camera.radius = radius;
     this.camera.lowerRadiusLimit = Math.max(radius * 0.05, 0.5);
-    this.camera.maxZ = Math.max(this.camera.maxZ, farPlane);
+    this.camera.maxZ = farPlane;
+    this.camera.minZ = Math.max(radius * 0.01, 0.05);
   }
 
   private notifySelectionChanged(): void {
@@ -921,6 +925,30 @@ export class BabylonSceneRenderer implements SceneRenderer {
         z: bounds.max.z - this.sceneOffset.z,
       },
     };
+  }
+
+  private updateCameraClipping(bounds: SceneGraph["bounds"]): void {
+    if (!bounds) {
+      this.camera.minZ = 0.1;
+      this.camera.maxZ = 10_000;
+      return;
+    }
+
+    const adjusted = this.adjustBounds(bounds);
+    if (!adjusted) {
+      this.camera.minZ = 0.1;
+      this.camera.maxZ = 10_000;
+      return;
+    }
+
+    const spanX = Math.max(adjusted.max.x - adjusted.min.x, 0.0001);
+    const spanY = Math.max(adjusted.max.y - adjusted.min.y, 0.0001);
+    const spanZ = Math.max(adjusted.max.z - adjusted.min.z, 0.0001);
+    const maxSpan = Math.max(spanX, spanY, spanZ);
+    const near = Math.max(maxSpan * 0.005, 0.05);
+    const far = Math.max(maxSpan * 10, near * 50);
+    this.camera.minZ = near;
+    this.camera.maxZ = far;
   }
 }
 
