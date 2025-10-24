@@ -23,7 +23,13 @@ import type {
   ColorMode,
 } from "./engine";
 import { tryGetPropertyFromColorMode } from "./engine";
-import { extractElementProperties, type ResolvedPoint, type SceneElement, type SceneGraph } from "@viewer/sceneGraph";
+import {
+  extractElementProperties,
+  type ResolvedPoint,
+  type SceneBend,
+  type SceneElement,
+  type SceneGraph,
+} from "@viewer/sceneGraph";
 
 export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
@@ -40,6 +46,7 @@ export const DEFAULT_PIPE_DIAMETER = 50;
 const MSAA_SAMPLES = 4;
 const Z_OFFSET_BUCKETS = 9;
 const Z_OFFSET_STEP = 0.02;
+const ARC_SEGMENT_LENGTH_TARGET = 30;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -364,22 +371,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "BOG": {
-        const first = this.createTubeSegment(
-          element.id,
-          "bend-segment-1",
-          element.start,
-          element.tangent,
-          { diameter: element.outerDiameter },
-        );
-        if (first) meshes.push(first);
-        const second = this.createTubeSegment(
-          element.id,
-          "bend-segment-2",
-          element.tangent,
-          element.end,
-          { diameter: element.outerDiameter },
-        );
-        if (second) meshes.push(second);
+        const mesh = this.createBendMesh(element);
+        if (mesh) {
+          meshes.push(mesh);
+        } else {
+          const fallbackMeshes = this.createSegmentedBendMeshes(element);
+          meshes.push(...fallbackMeshes);
+        }
         break;
       }
       case "TEE": {
@@ -508,6 +506,154 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     const mesh = MeshBuilder.CreateTube(`${elementId}-${suffix}`, tubeOptions, this.scene);
     return this.finalizeMesh(elementId, mesh);
+  }
+
+  private createBendMesh(element: SceneBend): Mesh | null {
+    if (
+      element.start.kind !== "coordinate" ||
+      element.end.kind !== "coordinate" ||
+      element.tangent.kind !== "coordinate"
+    ) {
+      return null;
+    }
+
+    const startVec = new BabylonVector3(
+      element.start.scenePosition.x,
+      element.start.scenePosition.y,
+      element.start.scenePosition.z,
+    );
+    const endVec = new BabylonVector3(
+      element.end.scenePosition.x,
+      element.end.scenePosition.y,
+      element.end.scenePosition.z,
+    );
+    const tangentVec = new BabylonVector3(
+      element.tangent.scenePosition.x,
+      element.tangent.scenePosition.y,
+      element.tangent.scenePosition.z,
+    );
+
+    startVec.subtractInPlace(this.sceneOffset);
+    endVec.subtractInPlace(this.sceneOffset);
+    tangentVec.subtractInPlace(this.sceneOffset);
+
+    const startToTangent = tangentVec.subtract(startVec);
+    const endToTangent = tangentVec.subtract(endVec);
+
+    if (startToTangent.lengthSquared() < 1e-6 || endToTangent.lengthSquared() < 1e-6) {
+      return null;
+    }
+
+    const planeNormal = BabylonVector3.Cross(startToTangent, endToTangent);
+    if (planeNormal.lengthSquared() < 1e-6) {
+      return null;
+    }
+    planeNormal.normalize();
+
+    const u = startToTangent.normalize();
+    let v = BabylonVector3.Cross(u, planeNormal);
+    if (v.lengthSquared() < 1e-6) {
+      return null;
+    }
+    v.normalize();
+
+    const startToEnd = endVec.subtract(startVec);
+    const ex = BabylonVector3.Dot(startToEnd, u);
+    let ey = BabylonVector3.Dot(startToEnd, v);
+
+    if (Math.abs(ey) < 1e-6) {
+      return null;
+    }
+
+    if (ey < 0) {
+      v = v.scale(-1);
+      ey = -ey;
+    }
+
+    const elbowRadius = (ex * ex + ey * ey) / (2 * ey);
+    if (!Number.isFinite(elbowRadius) || elbowRadius <= 1e-6) {
+      return null;
+    }
+
+    const center = startVec.add(v.scale(elbowRadius));
+
+    const startOffset = startVec.subtract(center);
+    const endOffset = endVec.subtract(center);
+
+    const startCoordX = BabylonVector3.Dot(startOffset, u);
+    const startCoordY = BabylonVector3.Dot(startOffset, v);
+    const endCoordX = BabylonVector3.Dot(endOffset, u);
+    const endCoordY = BabylonVector3.Dot(endOffset, v);
+
+    let startAngle = Math.atan2(startCoordY, startCoordX);
+    let endAngle = Math.atan2(endCoordY, endCoordX);
+
+    let delta = endAngle - startAngle;
+    if (delta <= 0) {
+      delta += Math.PI * 2;
+    }
+
+    const arcLength = elbowRadius * delta;
+    const segmentCount = Math.max(
+      12,
+      Math.min(128, Math.ceil(arcLength / ARC_SEGMENT_LENGTH_TARGET)),
+    );
+
+    const path: BabylonVector3[] = [];
+    for (let i = 0; i <= segmentCount; i += 1) {
+      const t = i / segmentCount;
+      const angle = startAngle + delta * t;
+      const uComponent = u.scale(Math.cos(angle) * elbowRadius);
+      const vComponent = v.scale(Math.sin(angle) * elbowRadius);
+      path.push(center.add(uComponent).add(vComponent));
+    }
+
+    if (path.length >= 2) {
+      path[0] = startVec.clone();
+      path[path.length - 1] = endVec.clone();
+    }
+
+    const capStart = this.shouldCapPoint(element.start);
+    const capEnd = this.shouldCapPoint(element.end);
+    let capOption = Mesh.NO_CAP;
+    if (capStart && capEnd) {
+      capOption = Mesh.CAP_ALL;
+    } else if (capStart) {
+      capOption = Mesh.CAP_START;
+    } else if (capEnd) {
+      capOption = Mesh.CAP_END;
+    }
+
+    const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
+      path,
+      cap: capOption,
+      radius: pipeDiameter * 0.5,
+    };
+
+    const mesh = MeshBuilder.CreateTube(`${element.id}-elbow`, tubeOptions, this.scene);
+    return this.finalizeMesh(element.id, mesh);
+  }
+
+  private createSegmentedBendMeshes(element: SceneBend): Mesh[] {
+    const meshes: Mesh[] = [];
+    const first = this.createTubeSegment(
+      element.id,
+      "bend-segment-1",
+      element.start,
+      element.tangent,
+      { diameter: element.outerDiameter },
+    );
+    if (first) meshes.push(first);
+    const second = this.createTubeSegment(
+      element.id,
+      "bend-segment-2",
+      element.tangent,
+      element.end,
+      { diameter: element.outerDiameter },
+    );
+    if (second) meshes.push(second);
+    return meshes;
   }
 
   private finalizeMesh(elementId: string, mesh: Mesh): Mesh {
