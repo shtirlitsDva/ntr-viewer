@@ -385,7 +385,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       case "TEE": {
         const mesh = this.createTeeMesh(element);
         if (!mesh) {
-          throw new Error("Failed to generate TEE mesh");
+          if (import.meta.env.DEV) {
+            console.warn(`[viewer] skipping TEE ${element.id} (CSG union failed)`);
+          }
+          break;
         }
         meshes.push(mesh);
         break;
