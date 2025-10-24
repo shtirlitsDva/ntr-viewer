@@ -1,4 +1,5 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
@@ -120,17 +121,23 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.ground.material = groundMaterial;
     this.ground.isPickable = false;
 
-    this.scene.onPointerDown = (event, pickInfo) => {
+    this.scene.onPointerObservable.add((pointerInfo) => {
+      if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) {
+        return;
+      }
+      const event = pointerInfo.event;
       if (event.button !== 0) {
         return;
       }
-      const metadata = pickInfo?.pickedMesh?.metadata as MeshMetadata | undefined;
-      if (pickInfo?.hit && metadata?.elementId) {
+
+      const pickResult = this.scene.pick(this.scene.pointerX, this.scene.pointerY);
+      const metadata = pickResult?.pickedMesh?.metadata as MeshMetadata | undefined;
+      if (pickResult?.hit && metadata?.elementId) {
         this.setSelection(metadata.elementId);
         return;
       }
       this.setSelection(null);
-    };
+    });
 
     this.engine.runRenderLoop(() => {
       this.scene.render();
