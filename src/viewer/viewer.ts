@@ -27,9 +27,11 @@ import {
   extractElementProperties,
   type ResolvedPoint,
   type SceneBend,
+  type SceneTee,
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
+import { CSG } from "@babylonjs/core/Meshes/csg";
 
 export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
   RO: new Color3(0.9, 0.6, 0.2),
@@ -381,22 +383,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
         break;
       }
       case "TEE": {
-        const main = this.createTubeSegment(
-          element.id,
-          "tee-main",
-          element.mainStart,
-          element.mainEnd,
-          { diameter: element.mainOuterDiameter },
-        );
-        if (main) meshes.push(main);
-        const branch = this.createTubeSegment(
-          element.id,
-          "tee-branch",
-          element.branchStart,
-          element.branchEnd,
-          { diameter: element.branchOuterDiameter },
-        );
-        if (branch) meshes.push(branch);
+        const mesh = this.createTeeMesh(element);
+        if (mesh) {
+          meshes.push(mesh);
+        } else {
+          const fallbackMeshes = this.createSegmentedTeeMeshes(element);
+          meshes.push(...fallbackMeshes);
+        }
         break;
       }
       case "ARM": {
@@ -653,6 +646,114 @@ export class BabylonSceneRenderer implements SceneRenderer {
       { diameter: element.outerDiameter },
     );
     if (second) meshes.push(second);
+    return meshes;
+  }
+
+  private createTeeMesh(element: SceneTee): Mesh | null {
+    if (
+      element.mainStart.kind !== "coordinate" ||
+      element.mainEnd.kind !== "coordinate" ||
+      element.branchStart.kind !== "coordinate" ||
+      element.branchEnd.kind !== "coordinate"
+    ) {
+      return null;
+    }
+
+    const mainStart = new BabylonVector3(
+      element.mainStart.scenePosition.x,
+      element.mainStart.scenePosition.y,
+      element.mainStart.scenePosition.z,
+    ).subtract(this.sceneOffset);
+    const mainEnd = new BabylonVector3(
+      element.mainEnd.scenePosition.x,
+      element.mainEnd.scenePosition.y,
+      element.mainEnd.scenePosition.z,
+    ).subtract(this.sceneOffset);
+    const branchStart = new BabylonVector3(
+      element.branchStart.scenePosition.x,
+      element.branchStart.scenePosition.y,
+      element.branchStart.scenePosition.z,
+    ).subtract(this.sceneOffset);
+    const branchEnd = new BabylonVector3(
+      element.branchEnd.scenePosition.x,
+      element.branchEnd.scenePosition.y,
+      element.branchEnd.scenePosition.z,
+    ).subtract(this.sceneOffset);
+
+    const mainDiameter = Math.max(element.mainOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const branchDiameter = Math.max(element.branchOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+
+    const mainCapStart = this.shouldCapPoint(element.mainStart);
+    const mainCapEnd = this.shouldCapPoint(element.mainEnd);
+    const branchCapStart = this.shouldCapPoint(element.branchStart);
+    const branchCapEnd = this.shouldCapPoint(element.branchEnd);
+
+    const computeCap = (start: boolean, end: boolean): number => {
+      if (start && end) return Mesh.CAP_ALL;
+      if (start) return Mesh.CAP_START;
+      if (end) return Mesh.CAP_END;
+      return Mesh.NO_CAP;
+    };
+
+    const mainTube = MeshBuilder.CreateTube(
+      `${element.id}-main-temp`,
+      {
+        path: [mainStart, mainEnd],
+        radius: mainDiameter * 0.5,
+        cap: computeCap(mainCapStart, mainCapEnd),
+      },
+      this.scene,
+    );
+
+    const branchTube = MeshBuilder.CreateTube(
+      `${element.id}-branch-temp`,
+      {
+        path: [branchStart, branchEnd],
+        radius: branchDiameter * 0.5,
+        cap: computeCap(branchCapStart, branchCapEnd),
+      },
+      this.scene,
+    );
+
+    try {
+      const mainCSG = CSG.FromMesh(mainTube);
+      const branchCSG = CSG.FromMesh(branchTube);
+      const combined = mainCSG.union(branchCSG);
+      combined.copyTransformAttributes(mainCSG);
+      const mesh = combined.toMesh(`${element.id}-tee`, undefined, this.scene, false);
+      mesh.forceSharedVertices();
+      mesh.refreshBoundingInfo(true);
+      mainTube.dispose(false, true);
+      branchTube.dispose(false, true);
+      return this.finalizeMesh(element.id, mesh);
+    } catch (error) {
+      if (import.meta.env.DEV) {
+        console.warn("[viewer] failed to generate tee mesh via CSG", error);
+      }
+      mainTube.dispose(false, true);
+      branchTube.dispose(false, true);
+      return null;
+    }
+  }
+
+  private createSegmentedTeeMeshes(element: SceneTee): Mesh[] {
+    const meshes: Mesh[] = [];
+    const main = this.createTubeSegment(
+      element.id,
+      "tee-main",
+      element.mainStart,
+      element.mainEnd,
+      { diameter: element.mainOuterDiameter },
+    );
+    if (main) meshes.push(main);
+    const branch = this.createTubeSegment(
+      element.id,
+      "tee-branch",
+      element.branchStart,
+      element.branchEnd,
+      { diameter: element.branchOuterDiameter },
+    );
+    if (branch) meshes.push(branch);
     return meshes;
   }
 
