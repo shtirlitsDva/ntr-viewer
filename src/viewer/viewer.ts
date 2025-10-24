@@ -120,6 +120,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
       const metadata = pick?.pickedMesh?.metadata as MeshMetadata | undefined;
       if (pick?.hit && metadata?.elementId) {
         this.setSelection(metadata.elementId);
+      } else {
+        this.setSelection(null);
       }
     });
 

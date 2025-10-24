@@ -201,6 +201,10 @@ const setupKeyboardShortcuts = () => {
         fitToCurrentBounds();
         event.preventDefault();
         break;
+      case "escape":
+        renderer?.setSelection(null);
+        event.preventDefault();
+        break;
       case "g":
         gridToggle.checked = !gridToggle.checked;
         renderer?.setGridVisible(gridToggle.checked);
@@ -486,10 +490,21 @@ const renderSelection = (element: SceneElement | null) => {
   const list = document.createElement("dl");
   list.className = "detail-list";
 
+  appendDetail(list, "Element ID", element.id);
   appendDetail(list, "Type", element.kind);
-  appendDetail(list, "Material", element.material ?? "—");
-  appendDetail(list, "Pipeline", element.pipeline ?? "—");
-  appendDetail(list, "Load Cases", element.loadCases.length ? element.loadCases.join(", ") : "—");
+  appendOptionalDetail(list, "Description", element.description);
+  appendOptionalDetail(list, "Reference", element.reference);
+  appendOptionalDetail(list, "Component Tag", element.componentTag);
+  appendOptionalDetail(list, "Pipeline", element.pipeline);
+  appendOptionalDetail(list, "Material", element.material);
+  appendOptionalDetail(list, "Norm", element.norm);
+  appendOptionalDetail(list, "Series", element.series);
+  appendOptionalDetail(list, "Schedule", element.schedule);
+  appendDetail(
+    list,
+    "Load Cases",
+    element.loadCases.length ? element.loadCases.join(", ") : "—",
+  );
 
   switch (element.kind) {
     case "RO":
@@ -521,6 +536,7 @@ const renderSelection = (element: SceneElement | null) => {
       appendDetail(list, "Main End", formatPoint(element.mainEnd));
       appendDetail(list, "Branch Start", formatPoint(element.branchStart));
       appendDetail(list, "Branch End", formatPoint(element.branchEnd));
+      appendOptionalDetail(list, "Tee Type", element.teeType);
       break;
     case "ARM":
       appendDetail(list, "Inlet Diameter", element.inletDiameter);
@@ -554,6 +570,17 @@ const appendDetail = (list: HTMLDListElement, label: string, value: string) => {
   description.textContent = value;
 
   list.append(term, description);
+};
+
+const appendOptionalDetail = (
+  list: HTMLDListElement,
+  label: string,
+  value: string | undefined,
+) => {
+  if (!value) {
+    return;
+  }
+  appendDetail(list, label, value);
 };
 
 const formatPoint = (point: ResolvedPoint | null | undefined): string => {

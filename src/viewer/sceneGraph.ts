@@ -24,6 +24,7 @@ import type {
   Vector3,
 } from "@ntr/types";
 
+// NOTE to AGENTS: Don't touch this!!! This works fine.
 const transformVector = (position: Vector3): Vector3 => ({
   x: position.x,
   y: position.z,
