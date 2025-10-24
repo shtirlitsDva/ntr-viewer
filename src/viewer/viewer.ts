@@ -9,6 +9,7 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+import "@babylonjs/core/Culling/ray";
 import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
