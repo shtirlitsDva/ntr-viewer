@@ -490,10 +490,18 @@ const setupFileDropListeners = async () => {
   try {
     unlistenFileDrop?.();
     unlistenFileDrop = await listen<string[]>("tauri://file-drop", (event) => {
-      const [path] = event.payload ?? [];
-      if (path) {
-        void handleDroppedFile(path);
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] file drop", event.payload);
       }
+      const [path] = event.payload ?? [];
+      if (!path) {
+        publishToast(createToast("warning", "Dropped file path unavailable"));
+        return;
+      }
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] loading", path);
+      }
+      void handleDroppedFile(path);
     });
   } catch (error) {
     console.warn("Failed to set up file drop listeners", error);
@@ -501,6 +509,9 @@ const setupFileDropListeners = async () => {
 };
 
 const handleDroppedFile = async (path: string) => {
+  if (import.meta.env.DEV) {
+    console.debug("[drag-drop] reading file", path);
+  }
   const result = await loadNtrFileAtPath(path);
   if (result.status === "success") {
     try {
