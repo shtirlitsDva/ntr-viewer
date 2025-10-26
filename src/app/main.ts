@@ -166,6 +166,7 @@ const initialize = async () => {
 
   setupToolbar();
   setupKeyboardShortcuts();
+  setupDragAndDrop();
   setupToasts();
   initializeTelemetryPreferences();
   renderFilePath(null);
@@ -285,6 +286,30 @@ const setupKeyboardShortcuts = () => {
       default:
         break;
     }
+  });
+};
+
+const setupDragAndDrop = () => {
+  window.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = "copy";
+    }
+  });
+
+  window.addEventListener("drop", (event) => {
+    event.preventDefault();
+    const files = event.dataTransfer?.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+    const file = files[0] as File & { path?: string };
+    const path = file.path;
+    if (!path) {
+      publishToast(createToast("warning", "Dropped file path unavailable"));
+      return;
+    }
+    void handleDroppedFile(path);
   });
 };
 
@@ -483,6 +508,27 @@ const setupFileWatchListeners = async () => {
   } catch (error) {
     console.warn("Failed to set up file watch listeners", error);
   }
+};
+
+const handleDroppedFile = async (path: string) => {
+  const result = await loadNtrFileAtPath(path);
+  if (result.status === "success") {
+    try {
+      loadFileFromContents(result.path, result.contents, "manual");
+    } catch (error) {
+      console.error(error);
+      publishToast(createToast("error", "Unexpected error while opening dropped file"));
+    }
+    return;
+  }
+
+  publishToast(
+    createToast(
+      "error",
+      "Failed to open dropped file",
+      result.status === "error" ? result.message : undefined,
+    ),
+  );
 };
 
 const handleOpenFile = async () => {
