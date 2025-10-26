@@ -19,8 +19,7 @@ import type { ColorMode, SceneRenderer } from "@viewer/engine";
 import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { InitializeCSG2Async } from "@babylonjs/core/Meshes/csg2";
 
 interface AppState {
@@ -498,38 +497,40 @@ const setupFileDropListeners = async () => {
     });
     unlistenFileDrop = [];
 
-    const appWindow = getCurrentWebviewWindow();
+    let highlightDispose: () => void;
+    let overDispose: () => void;
+    let leaveDispose: () => void;
+    let dropDispose: () => void;
 
-    const handleDrop = async (paths: readonly string[] | null | undefined) => {
+    highlightDispose = await listen<string[]>(TauriEvent.DRAG_ENTER, (event) => {
       if (import.meta.env.DEV) {
-        console.debug("[drag-drop] file drop", paths);
+        console.debug("[drag-drop] drag enter", (event as unknown as { payload?: string[] }).payload);
       }
-      const path = paths?.[0];
+    });
+    overDispose = await listen<string[]>(TauriEvent.DRAG_OVER, (event) => {
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] drag over", (event as unknown as { payload?: string[] }).payload);
+      }
+    });
+    leaveDispose = await listen<string[]>(TauriEvent.DRAG_LEAVE, () => {
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] drag leave");
+      }
+    });
+    dropDispose = await listen<string[]>(TauriEvent.DRAG_DROP, (event) => {
+      const payload = (event as unknown as { payload?: string[] }).payload;
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] drag drop", payload);
+      }
+      const path = payload?.[0];
       if (!path) {
         publishToast(createToast("warning", "Dropped file path unavailable"));
         return;
       }
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] loading", path);
-      }
       void handleDroppedFile(path);
-    };
-
-    const drop = await appWindow.listen<readonly string[]>("tauri://file-drop", (event) => {
-      void handleDrop(event.payload);
-    });
-    const hover = await appWindow.listen<readonly string[]>("tauri://file-drop-hover", (event) => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] hover", event.payload);
-      }
-    });
-    const cancel = await appWindow.listen("tauri://file-drop-cancelled", () => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] cancelled");
-      }
     });
 
-    unlistenFileDrop.push(drop, hover, cancel);
+    unlistenFileDrop.push(highlightDispose, overDispose, leaveDispose, dropDispose);
   } catch (error) {
     console.warn("Failed to set up file drop listeners", error);
   }
