@@ -20,6 +20,7 @@ import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { InitializeCSG2Async } from "@babylonjs/core/Meshes/csg2";
 
 interface AppState {
@@ -60,7 +61,7 @@ type LoadSource = "manual" | "restore" | "watch";
 
 let unlistenFileChange: (() => void) | null = null;
 let unlistenWatchError: (() => void) | null = null;
-let unlistenFileDrop: (() => void) | null = null;
+let unlistenFileDrop: Array<() => void> = [];
 
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
@@ -488,12 +489,22 @@ const setupFileWatchListeners = async () => {
 
 const setupFileDropListeners = async () => {
   try {
-    unlistenFileDrop?.();
-    unlistenFileDrop = await listen<string[]>("tauri://file-drop", (event) => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] file drop", event.payload);
+    unlistenFileDrop.forEach((dispose) => {
+      try {
+        dispose();
+      } catch (error) {
+        console.warn("Failed disposing file drop listener", error);
       }
-      const [path] = event.payload ?? [];
+    });
+    unlistenFileDrop = [];
+
+    const appWindow = getCurrentWebviewWindow();
+
+    const handleDrop = async (paths: readonly string[] | null | undefined) => {
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] file drop", paths);
+      }
+      const path = paths?.[0];
       if (!path) {
         publishToast(createToast("warning", "Dropped file path unavailable"));
         return;
@@ -502,7 +513,23 @@ const setupFileDropListeners = async () => {
         console.debug("[drag-drop] loading", path);
       }
       void handleDroppedFile(path);
+    };
+
+    const drop = await appWindow.listen<readonly string[]>("tauri://file-drop", (event) => {
+      void handleDrop(event.payload);
     });
+    const hover = await appWindow.listen<readonly string[]>("tauri://file-drop-hover", (event) => {
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] hover", event.payload);
+      }
+    });
+    const cancel = await appWindow.listen("tauri://file-drop-cancelled", () => {
+      if (import.meta.env.DEV) {
+        console.debug("[drag-drop] cancelled");
+      }
+    });
+
+    unlistenFileDrop.push(drop, hover, cancel);
   } catch (error) {
     console.warn("Failed to set up file drop listeners", error);
   }
@@ -700,6 +727,13 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("beforeunload", () => {
   unlistenFileChange?.();
   unlistenWatchError?.();
-  unlistenFileDrop?.();
+  unlistenFileDrop.forEach((dispose) => {
+    try {
+      dispose();
+    } catch (error) {
+      console.warn("Failed disposing file drop listener", error);
+    }
+  });
+  unlistenFileDrop = [];
   void stopFileWatch();
 });
