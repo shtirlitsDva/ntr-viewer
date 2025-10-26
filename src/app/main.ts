@@ -518,11 +518,11 @@ const setupFileDropListeners = async () => {
       }
     });
     dropDispose = await listen<string[]>(TauriEvent.DRAG_DROP, (event) => {
-      const payload = (event as unknown as { payload?: string[] }).payload;
+      const payload = (event as unknown as { payload?: { paths: string[] } }).payload;
       if (import.meta.env.DEV) {
         console.debug("[drag-drop] drag drop", payload);
       }
-      const path = payload?.[0];
+      const path = payload?.paths?.[0];
       if (!path) {
         publishToast(createToast("warning", "Dropped file path unavailable"));
         return;
