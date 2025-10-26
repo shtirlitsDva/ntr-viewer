@@ -60,6 +60,7 @@ type LoadSource = "manual" | "restore" | "watch";
 
 let unlistenFileChange: (() => void) | null = null;
 let unlistenWatchError: (() => void) | null = null;
+let unlistenFileDrop: (() => void) | null = null;
 
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
@@ -166,7 +167,6 @@ const initialize = async () => {
 
   setupToolbar();
   setupKeyboardShortcuts();
-  setupDragAndDrop();
   setupToasts();
   initializeTelemetryPreferences();
   renderFilePath(null);
@@ -286,30 +286,6 @@ const setupKeyboardShortcuts = () => {
       default:
         break;
     }
-  });
-};
-
-const setupDragAndDrop = () => {
-  window.addEventListener("dragover", (event) => {
-    event.preventDefault();
-    if (event.dataTransfer) {
-      event.dataTransfer.dropEffect = "copy";
-    }
-  });
-
-  window.addEventListener("drop", (event) => {
-    event.preventDefault();
-    const files = event.dataTransfer?.files;
-    if (!files || files.length === 0) {
-      return;
-    }
-    const file = files[0] as File & { path?: string };
-    const path = file.path;
-    if (!path) {
-      publishToast(createToast("warning", "Dropped file path unavailable"));
-      return;
-    }
-    void handleDroppedFile(path);
   });
 };
 
@@ -510,6 +486,20 @@ const setupFileWatchListeners = async () => {
   }
 };
 
+const setupFileDropListeners = async () => {
+  try {
+    unlistenFileDrop?.();
+    unlistenFileDrop = await listen<string[]>("tauri://file-drop", (event) => {
+      const [path] = event.payload ?? [];
+      if (path) {
+        void handleDroppedFile(path);
+      }
+    });
+  } catch (error) {
+    console.warn("Failed to set up file drop listeners", error);
+  }
+};
+
 const handleDroppedFile = async (path: string) => {
   const result = await loadNtrFileAtPath(path);
   if (result.status === "success") {
@@ -690,6 +680,7 @@ const fitToCurrentBounds = () => {
 window.addEventListener("DOMContentLoaded", () => {
   void (async () => {
     await initialize();
+    await setupFileDropListeners();
     await setupFileWatchListeners();
     await restoreLastFile();
   })();
@@ -698,5 +689,6 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("beforeunload", () => {
   unlistenFileChange?.();
   unlistenWatchError?.();
+  unlistenFileDrop?.();
   void stopFileWatch();
 });
