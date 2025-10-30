@@ -29,7 +29,7 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
 
     if (rotateHeld) {
       this.camera.inertialAlphaOffset -= offsetX / this.angularSensibilityX;
-      this.camera.inertialBetaOffset -= offsetY / this.angularSensibilityY;
+      this.camera.inertialBetaOffset = 0;
       return;
     }
 

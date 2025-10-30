@@ -1,4 +1,3 @@
-import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -14,6 +13,7 @@ import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
 import { RevitStylePointerInput } from "./RevitStylePointerInput.ts";
+import { PivotOrbitCamera } from "./camera/PivotOrbitCamera.ts";
 
 import type {
   SceneRenderer,
@@ -62,7 +62,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
   private readonly scene: Scene;
-  private readonly camera: ArcRotateCamera;
+  private readonly camera: PivotOrbitCamera;
   private readonly ground: Mesh;
   private readonly selectionListeners = new Set<SelectionListener>();
   private readonly elementMeshes = new Map<string, Mesh[]>();
@@ -87,7 +87,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
 
-    this.camera = new ArcRotateCamera(
+    this.camera = new PivotOrbitCamera(
       "camera",
       Math.PI / 4,
       Math.PI / 3,
@@ -222,6 +222,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     }
     this.selectedElement = elementId;
     this.applySelectionColors();
+    this.updateCameraPivot();
     this.notifySelectionChanged();
   }
 
@@ -292,6 +293,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.elementMaterials.clear();
     this.elementProperties.clear();
     this.propertyColorCache.clear();
+    this.camera.setOverridePivot(null);
   }
 
   private updateGround(bounds: SceneGraph["bounds"]): void {
@@ -333,6 +335,56 @@ export class BabylonSceneRenderer implements SceneRenderer {
       const highlighted = this.selectedElement === id;
       this.applyMaterialColor(id, highlighted ? HIGHLIGHT_COLOR : baseColor, highlighted);
     }
+  }
+
+  private updateCameraPivot(): void {
+    if (!this.selectedElement) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    const meshes = this.elementMeshes.get(this.selectedElement);
+    if (!meshes || meshes.length === 0) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let hasBounds = false;
+
+    for (const mesh of meshes) {
+      if (mesh.isDisposed()) {
+        continue;
+      }
+      mesh.refreshBoundingInfo();
+      const boundingInfo = mesh.getBoundingInfo();
+      const minimum = boundingInfo.boundingBox.minimumWorld;
+      const maximum = boundingInfo.boundingBox.maximumWorld;
+      minX = Math.min(minX, minimum.x);
+      minY = Math.min(minY, minimum.y);
+      minZ = Math.min(minZ, minimum.z);
+      maxX = Math.max(maxX, maximum.x);
+      maxY = Math.max(maxY, maximum.y);
+      maxZ = Math.max(maxZ, maximum.z);
+      hasBounds = true;
+    }
+
+    if (!hasBounds) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    const center = new BabylonVector3(
+      (minX + maxX) / 2,
+      (minY + maxY) / 2,
+      (minZ + maxZ) / 2,
+    );
+    this.camera.setOverridePivot(center);
   }
 
   private applyMaterialColor(id: string, color: Color3, highlight: boolean): void {
