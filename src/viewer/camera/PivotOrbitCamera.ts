@@ -1,5 +1,5 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 /**
  * ArcRotateCamera extension that lets callers temporarily override the pivot
@@ -8,7 +8,6 @@ import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math
 export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly EPSILON = 1e-6;
   private overridePivot: Vector3 | null = null;
-  private storedScreenOffset: Vector2 | null = null;
 
   /**
    * Returns the currently active pivot: either the override (if any) or the
@@ -20,11 +19,25 @@ export class PivotOrbitCamera extends ArcRotateCamera {
 
   public setOverridePivot(pivot: Vector3 | null): void {
     if (pivot) {
-      this.applyPivot(pivot);
+      const pivotClone = pivot.clone();
+      if (this.overridePivot?.equalsWithEpsilon(pivotClone, 1e-6)) {
+        return;
+      }
+
+      const preservedPosition = this.position.clone();
+      this.overridePivot = pivotClone;
+      this.setTarget(pivotClone);
+      this.setPosition(this.ensureSafePosition(preservedPosition));
       return;
     }
 
-    this.clearPivot();
+    if (!this.overridePivot) {
+      return;
+    }
+
+    const preservedPosition = this.position.clone();
+    this.overridePivot = null;
+    this.setPosition(this.ensureSafePosition(preservedPosition));
   }
 
   /**
@@ -118,48 +131,11 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     }
   }
 
-  private applyPivot(pivot: Vector3): void {
-    const pivotClone = pivot.clone();
-    const scene = this.getScene();
-    const engine = scene.getEngine();
-    const viewport = this.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
-    const identity = Matrix.Identity();
-
-    const preMatrix = scene.getTransformMatrix();
-    const pivotScreenBefore = Vector3.Project(pivotClone, identity, preMatrix, viewport);
-
-    const preservedPosition = this.position.clone();
-
-    if (!this.storedScreenOffset) {
-      this.storedScreenOffset = this.targetScreenOffset.clone();
+  private ensureSafePosition(position: Vector3): Vector3 {
+    const safe = position.clone();
+    if (safe.equalsWithEpsilon(this.target, 1e-6)) {
+      safe.y += 1e-3;
     }
-
-    this.overridePivot = pivotClone;
-    this.setTarget(pivotClone);
-    this.setPosition(preservedPosition);
-
-    const postMatrix = scene.getTransformMatrix();
-    const pivotScreenAfter = Vector3.Project(pivotClone, identity, postMatrix, viewport);
-
-    const baseOffset = this.storedScreenOffset.clone();
-    if (Number.isFinite(pivotScreenBefore.x) && Number.isFinite(pivotScreenBefore.y)) {
-      if (Number.isFinite(pivotScreenAfter.x) && Number.isFinite(pivotScreenAfter.y)) {
-        const deltaX = pivotScreenBefore.x - pivotScreenAfter.x;
-        const deltaY = pivotScreenBefore.y - pivotScreenAfter.y;
-        baseOffset.x += deltaX;
-        baseOffset.y += deltaY;
-      }
-    }
-    this.targetScreenOffset.copyFrom(baseOffset);
-  }
-
-  private clearPivot(): void {
-    this.overridePivot = null;
-    if (this.storedScreenOffset) {
-      this.targetScreenOffset.copyFrom(this.storedScreenOffset);
-    } else {
-      this.targetScreenOffset.set(0, 0);
-    }
-    this.storedScreenOffset = null;
+    return safe;
   }
 }
