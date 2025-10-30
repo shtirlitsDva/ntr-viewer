@@ -59,6 +59,17 @@ let optionsPreviousFocus: HTMLElement | null = null;
 
 const activeToasts = new Map<string, HTMLElement>();
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
+const SETTINGS_STORAGE_KEY = "ntr-viewer:options";
+
+interface PersistedSettings {
+  readonly rotationSensitivity: number;
+  readonly panSensitivity: number;
+}
+
+const DEFAULT_SETTINGS: PersistedSettings = {
+  rotationSensitivity: 1,
+  panSensitivity: 1,
+};
 
 interface FileChangePayload {
   readonly path: string;
@@ -179,6 +190,10 @@ const initialize = async () => {
   // renderer = createHighTessellationRenderer(getCanvas());
   renderer.onSelectionChanged(handleSelectionChange);
   renderer.setGridVisible(gridToggle.checked);
+  const persistedSettings = getPersistedSettings();
+  renderer.setRotationSensitivity(persistedSettings.rotationSensitivity);
+  renderer.setPanSensitivity(persistedSettings.panSensitivity);
+  refreshOptionsValues();
   updateColorModeOptions([]);
 
   setupToolbar();
@@ -252,12 +267,43 @@ const formatNumberForInput = (value: number): string => {
   return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2).replace(/(?:\.0+|0+)$/, "");
 };
 
-function refreshOptionsValues(): void {
-  if (!renderer) {
-    return;
+const getPersistedSettings = (): PersistedSettings => {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_SETTINGS;
+    }
+    const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
+    const rotation = Number(parsed.rotationSensitivity);
+    const pan = Number(parsed.panSensitivity);
+    return {
+      rotationSensitivity:
+        Number.isFinite(rotation) && rotation > 0 ? rotation : DEFAULT_SETTINGS.rotationSensitivity,
+      panSensitivity: Number.isFinite(pan) && pan > 0 ? pan : DEFAULT_SETTINGS.panSensitivity,
+    };
+  } catch (error) {
+    console.warn("Failed to read viewer options", error);
+    return DEFAULT_SETTINGS;
   }
-  rotationSensitivityInput.value = formatNumberForInput(renderer.getRotationSensitivity());
-  panSensitivityInput.value = formatNumberForInput(renderer.getPanSensitivity());
+};
+
+const persistSettings = (settings: PersistedSettings) => {
+  try {
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  } catch (error) {
+    console.warn("Failed to persist viewer options", error);
+  }
+};
+
+function refreshOptionsValues(): void {
+  const settings = renderer
+    ? {
+        rotationSensitivity: renderer.getRotationSensitivity(),
+        panSensitivity: renderer.getPanSensitivity(),
+      }
+    : getPersistedSettings();
+  rotationSensitivityInput.value = formatNumberForInput(settings.rotationSensitivity);
+  panSensitivityInput.value = formatNumberForInput(settings.panSensitivity);
 }
 
 function handleOptionsKeydown(event: KeyboardEvent): void {
@@ -284,6 +330,10 @@ function hideOptionsPanel(): void {
   if (!optionsVisible) {
     return;
   }
+  persistSettings({
+    rotationSensitivity: renderer?.getRotationSensitivity() ?? DEFAULT_SETTINGS.rotationSensitivity,
+    panSensitivity: renderer?.getPanSensitivity() ?? DEFAULT_SETTINGS.panSensitivity,
+  });
   optionsPanel.classList.remove("visible");
   optionsPanel.setAttribute("hidden", "");
   optionsVisible = false;
@@ -306,6 +356,10 @@ function applyRotationInput(): void {
   }
   renderer.setRotationSensitivity(parsed);
   rotationSensitivityInput.value = formatNumberForInput(renderer.getRotationSensitivity());
+  persistSettings({
+    rotationSensitivity: renderer.getRotationSensitivity(),
+    panSensitivity: renderer.getPanSensitivity(),
+  });
 }
 
 function applyPanInput(): void {
@@ -320,6 +374,10 @@ function applyPanInput(): void {
   }
   renderer.setPanSensitivity(parsed);
   panSensitivityInput.value = formatNumberForInput(renderer.getPanSensitivity());
+  persistSettings({
+    rotationSensitivity: renderer.getRotationSensitivity(),
+    panSensitivity: renderer.getPanSensitivity(),
+  });
 }
 
 function handleManualPathSubmit(event: SubmitEvent): void {
