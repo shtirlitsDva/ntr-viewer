@@ -1,6 +1,7 @@
 import type { Nullable } from "@babylonjs/core/types";
 import { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
 import type { PointerTouch } from "@babylonjs/core/Events/pointerEvents";
+import { PivotOrbitCamera } from "./camera/PivotOrbitCamera.ts";
 
 /**
  * Custom pointer handler that mimics Revit-style navigation:
@@ -21,6 +22,7 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
   }
 
   public override onTouch(_point: Nullable<PointerTouch>, offsetX: number, offsetY: number): void {
+    const camera = this.camera as PivotOrbitCamera;
     const rotateHeld =
       this._shiftKey ||
       this._altKey ||
@@ -28,8 +30,9 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
       (this._ctrlKey && !this.camera._useCtrlForPanning);
 
     if (rotateHeld) {
-      this.camera.inertialAlphaOffset -= offsetX / this.angularSensibilityX;
-      this.camera.inertialBetaOffset = 0;
+      const deltaYaw = offsetX / this.angularSensibilityX;
+      const deltaPitch = offsetY / this.angularSensibilityY;
+      camera.orbit(deltaYaw, deltaPitch);
       return;
     }
 

@@ -99,6 +99,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.lowerRadiusLimit = 0.1;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
+    this.camera.lowerBetaLimit = 0.01;
+    this.camera.upperBetaLimit = Math.PI - 0.01;
+    this.camera.allowUpsideDown = false;
     this.camera.wheelDeltaPercentage = 0.01;
     this.camera.panningSensibility = 50;
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
