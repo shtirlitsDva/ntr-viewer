@@ -1,5 +1,5 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 /**
  * ArcRotateCamera extension that lets callers temporarily override the pivot
@@ -8,7 +8,6 @@ import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math
 export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly EPSILON = 1e-6;
   private overridePivot: Vector3 | null = null;
-  private storedScreenOffset: Vector2 | null = null;
 
   /**
    * Returns the currently active pivot: either the override (if any) or the
@@ -18,16 +17,16 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     return this.overridePivot ?? this.target;
   }
 
-  /**
-   * Sets or clears the override pivot. When an override is applied, the camera
-   * keeps its current view; the pivot only affects subsequent orbit gestures.
-   */
   public setOverridePivot(pivot: Vector3 | null): void {
     if (pivot) {
-      this.applyOverridePivot(pivot);
+      const pivotClone = pivot.clone();
+      if (!this.overridePivot?.equalsWithEpsilon(pivotClone, 1e-6)) {
+        this.overridePivot = pivotClone;
+      }
       return;
     }
-    this.clearOverridePivot();
+
+    this.overridePivot = null;
   }
 
   /**
@@ -82,7 +81,7 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     }
 
     const newPosition = pivot.add(rotatedPosition);
-    const newTarget = this.overridePivot ? pivot : pivot.add(rotatedTarget);
+    const newTarget = pivot.add(rotatedTarget);
 
     this.inertialAlphaOffset = 0;
     this.inertialBetaOffset = 0;
@@ -119,66 +118,5 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     if (this.upperBetaLimit === null || this.upperBetaLimit === undefined) {
       this.upperBetaLimit = Math.PI - defaultPadding;
     }
-  }
-
-  private applyOverridePivot(pivot: Vector3): void {
-    const pivotClone = pivot.clone();
-    const preservedPosition = this.position.clone();
-    const previousTarget = this.target.clone();
-    const scene = this.getScene();
-    const engine = scene.getEngine();
-    const viewport = this.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight());
-    const transformMatrix = scene.getTransformMatrix();
-
-    if (!this.storedScreenOffset) {
-      this.storedScreenOffset = this.targetScreenOffset.clone();
-    }
-
-    let screenOffset = Vector2.Zero();
-    try {
-      const projectedPivot = Vector3.Project(
-        pivotClone,
-        Matrix.Identity(),
-        transformMatrix,
-        viewport,
-      );
-      const projectedTarget = Vector3.Project(
-        previousTarget,
-        Matrix.Identity(),
-        transformMatrix,
-        viewport,
-      );
-      screenOffset = new Vector2(
-        projectedTarget.x - projectedPivot.x,
-        projectedTarget.y - projectedPivot.y,
-      );
-    } catch (error) {
-      console.warn("[PivotOrbitCamera] failed to compute screen offset", error);
-      screenOffset = Vector2.Zero();
-    }
-
-    this.overridePivot = pivotClone;
-    this.targetScreenOffset.copyFrom(this.storedScreenOffset);
-    this.targetScreenOffset.addInPlace(screenOffset);
-    this.setTarget(pivotClone);
-    this.setPosition(this.ensureSafePosition(preservedPosition));
-  }
-
-  private clearOverridePivot(): void {
-    this.overridePivot = null;
-    if (this.storedScreenOffset) {
-      this.targetScreenOffset.copyFrom(this.storedScreenOffset);
-    } else {
-      this.targetScreenOffset.set(0, 0);
-    }
-    this.storedScreenOffset = null;
-  }
-
-  private ensureSafePosition(position: Vector3): Vector3 {
-    const safe = position.clone();
-    if (safe.equalsWithEpsilon(this.target, 1e-6)) {
-      safe.y += 1e-3;
-    }
-    return safe;
   }
 }
