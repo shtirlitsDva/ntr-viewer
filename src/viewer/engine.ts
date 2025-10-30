@@ -23,6 +23,10 @@ export interface SceneRenderer {
   onSelectionChanged(listener: SelectionListener): () => void;
   setGridVisible(visible: boolean): void;
   fitToBounds(bounds: SceneGraph["bounds"]): void;
+  getRotationSensitivity(): number;
+  setRotationSensitivity(value: number): void;
+  getPanSensitivity(): number;
+  setPanSensitivity(value: number): void;
   dispose(): void;
 }
 

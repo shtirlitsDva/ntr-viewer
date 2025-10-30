@@ -46,7 +46,16 @@ let gridToggle: HTMLInputElement;
 let telemetryToggle: HTMLInputElement;
 let toastContainer: HTMLElement;
 let colorModeSelect: HTMLSelectElement;
+let optionsPanel: HTMLElement;
+let optionsOpenButton: HTMLButtonElement;
+let optionsCloseButton: HTMLButtonElement;
+let rotationSensitivityInput: HTMLInputElement;
+let panSensitivityInput: HTMLInputElement;
+let manualPathForm: HTMLFormElement;
+let manualPathInput: HTMLInputElement;
 let currentColorMode: ColorMode = "type";
+let optionsVisible = false;
+let optionsPreviousFocus: HTMLElement | null = null;
 
 const activeToasts = new Map<string, HTMLElement>();
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
@@ -157,6 +166,13 @@ const initialize = async () => {
   telemetryToggle = queryElement<HTMLInputElement>('[data-control="telemetry-toggle"]');
   toastContainer = queryElement<HTMLElement>('[data-state="toasts"]');
   colorModeSelect = queryElement<HTMLSelectElement>('[data-control="color-mode"]');
+  optionsPanel = queryElement<HTMLElement>('[data-state="options-panel"]');
+  optionsOpenButton = queryElement<HTMLButtonElement>('[data-action="open-options"]');
+  optionsCloseButton = queryElement<HTMLButtonElement>('[data-action="close-options"]');
+  rotationSensitivityInput = queryElement<HTMLInputElement>('[data-control="rotation-sensitivity"]');
+  panSensitivityInput = queryElement<HTMLInputElement>('[data-control="pan-sensitivity"]');
+  manualPathForm = queryElement<HTMLFormElement>('[data-action="manual-path-form"]');
+  manualPathInput = queryElement<HTMLInputElement>('[data-control="manual-path"]');
 
   // Swap renderer factories here for experimentation:
   renderer = createBabylonRenderer(getCanvas());
@@ -166,6 +182,7 @@ const initialize = async () => {
   updateColorModeOptions([]);
 
   setupToolbar();
+  setupOptionsPanel();
   setupKeyboardShortcuts();
   setupToasts();
   initializeTelemetryPreferences();
@@ -196,6 +213,14 @@ const setupToolbar = () => {
     fitToCurrentBounds();
   });
 
+  optionsOpenButton.addEventListener("click", () => {
+    if (optionsVisible) {
+      hideOptionsPanel();
+    } else {
+      showOptionsPanel();
+    }
+  });
+
   colorModeSelect.addEventListener("change", (event) => {
     const select = event.target as HTMLSelectElement;
     currentColorMode = select.value as ColorMode;
@@ -218,6 +243,118 @@ const setupToolbar = () => {
     );
   });
 };
+
+const formatNumberForInput = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return "1";
+  }
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2).replace(/(?:\.0+|0+)$/, "");
+};
+
+function refreshOptionsValues(): void {
+  if (!renderer) {
+    return;
+  }
+  rotationSensitivityInput.value = formatNumberForInput(renderer.getRotationSensitivity());
+  panSensitivityInput.value = formatNumberForInput(renderer.getPanSensitivity());
+}
+
+function handleOptionsKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    hideOptionsPanel();
+  }
+}
+
+function showOptionsPanel(): void {
+  if (optionsVisible) {
+    return;
+  }
+  refreshOptionsValues();
+  optionsPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  optionsPanel.removeAttribute("hidden");
+  optionsPanel.classList.add("visible");
+  optionsVisible = true;
+  optionsCloseButton.focus();
+  document.addEventListener("keydown", handleOptionsKeydown);
+}
+
+function hideOptionsPanel(): void {
+  if (!optionsVisible) {
+    return;
+  }
+  optionsPanel.classList.remove("visible");
+  optionsPanel.setAttribute("hidden", "");
+  optionsVisible = false;
+  document.removeEventListener("keydown", handleOptionsKeydown);
+  if (optionsPreviousFocus) {
+    optionsPreviousFocus.focus();
+    optionsPreviousFocus = null;
+  }
+}
+
+function applyRotationInput(): void {
+  if (!renderer) {
+    return;
+  }
+  const current = renderer.getRotationSensitivity();
+  const parsed = Number(rotationSensitivityInput.value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    rotationSensitivityInput.value = formatNumberForInput(current);
+    return;
+  }
+  renderer.setRotationSensitivity(parsed);
+  rotationSensitivityInput.value = formatNumberForInput(renderer.getRotationSensitivity());
+}
+
+function applyPanInput(): void {
+  if (!renderer) {
+    return;
+  }
+  const current = renderer.getPanSensitivity();
+  const parsed = Number(panSensitivityInput.value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    panSensitivityInput.value = formatNumberForInput(current);
+    return;
+  }
+  renderer.setPanSensitivity(parsed);
+  panSensitivityInput.value = formatNumberForInput(renderer.getPanSensitivity());
+}
+
+function handleManualPathSubmit(event: SubmitEvent): void {
+  event.preventDefault();
+  const path = manualPathInput.value.trim();
+  if (!path) {
+    publishToast(createToast("warning", "Enter a file path to load."));
+    manualPathInput.focus();
+    return;
+  }
+  void (async () => {
+    const success = await handleLoadFileFromPath(path);
+    if (success) {
+      manualPathInput.value = "";
+      hideOptionsPanel();
+    }
+  })();
+}
+
+function setupOptionsPanel(): void {
+  optionsPanel.addEventListener("click", (event) => {
+    if (event.target === optionsPanel) {
+      hideOptionsPanel();
+    }
+  });
+  optionsCloseButton.addEventListener("click", () => {
+    hideOptionsPanel();
+  });
+  rotationSensitivityInput.addEventListener("change", applyRotationInput);
+  rotationSensitivityInput.addEventListener("blur", applyRotationInput);
+  panSensitivityInput.addEventListener("change", applyPanInput);
+  panSensitivityInput.addEventListener("blur", applyPanInput);
+  manualPathForm.addEventListener("submit", handleManualPathSubmit);
+  refreshOptionsValues();
+}
 
 const updateColorModeOptions = (propertyNames: readonly string[]) => {
   if (!colorModeSelect) {
@@ -558,6 +695,29 @@ const handleDroppedFile = async (path: string) => {
       result.status === "error" ? result.message : undefined,
     ),
   );
+};
+
+const handleLoadFileFromPath = async (path: string): Promise<boolean> => {
+  const result = await loadNtrFileAtPath(path);
+  if (result.status === "success") {
+    try {
+      loadFileFromContents(result.path, result.contents, "manual");
+      return true;
+    } catch (error) {
+      console.error(error);
+      publishToast(createToast("error", "Unexpected error while opening file"));
+      return false;
+    }
+  }
+
+  publishToast(
+    createToast(
+      "error",
+      "Failed to open NTR file",
+      result.status === "error" ? result.message : undefined,
+    ),
+  );
+  return false;
 };
 
 const handleOpenFile = async () => {

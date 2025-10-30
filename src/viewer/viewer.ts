@@ -63,6 +63,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly engine: Engine;
   private readonly scene: Scene;
   private readonly camera: PivotOrbitCamera;
+  private readonly pointerInput: RevitStylePointerInput;
   private readonly ground: Mesh;
   private readonly selectionListeners = new Set<SelectionListener>();
   private readonly elementMeshes = new Map<string, Mesh[]>();
@@ -106,7 +107,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.panningSensibility = 50;
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
-    this.camera.inputs.add(new RevitStylePointerInput());
+    this.pointerInput = new RevitStylePointerInput();
+    this.camera.inputs.add(this.pointerInput);
 
     this.configureRenderingPipeline();
 
@@ -239,6 +241,22 @@ export class BabylonSceneRenderer implements SceneRenderer {
   public setGridVisible(visible: boolean): void {
     this.gridVisible = visible;
     this.ground.isVisible = visible && this.currentGraph?.bounds !== null;
+  }
+
+  public getRotationSensitivity(): number {
+    return this.pointerInput.getRotationSensitivity();
+  }
+
+  public setRotationSensitivity(value: number): void {
+    this.pointerInput.setRotationSensitivity(value);
+  }
+
+  public getPanSensitivity(): number {
+    return this.pointerInput.getPanSensitivity();
+  }
+
+  public setPanSensitivity(value: number): void {
+    this.pointerInput.setPanSensitivity(value);
   }
 
   public fitToBounds(bounds: SceneGraph["bounds"]): void {
