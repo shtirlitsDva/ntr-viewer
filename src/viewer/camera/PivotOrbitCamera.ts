@@ -1,5 +1,5 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
-import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import { Matrix, Quaternion, Vector2, Vector3 } from "@babylonjs/core/Maths/math.vector";
 
 /**
  * ArcRotateCamera extension that lets callers temporarily override the pivot
@@ -8,6 +8,8 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly EPSILON = 1e-6;
   private overridePivot: Vector3 | null = null;
+  private storedScreenOffset: Vector2 | null = null;
+  private previousTargetBeforeOverride: Vector3 | null = null;
 
   /**
    * Returns the currently active pivot: either the override (if any) or the
@@ -19,25 +21,11 @@ export class PivotOrbitCamera extends ArcRotateCamera {
 
   public setOverridePivot(pivot: Vector3 | null): void {
     if (pivot) {
-      const pivotClone = pivot.clone();
-      if (this.overridePivot?.equalsWithEpsilon(pivotClone, 1e-6)) {
-        return;
-      }
-
-      const preservedPosition = this.position.clone();
-      this.overridePivot = pivotClone;
-      this.setTarget(pivotClone);
-      this.setPosition(this.ensureSafePosition(preservedPosition));
+      this.applyOverridePivot(pivot);
       return;
     }
 
-    if (!this.overridePivot) {
-      return;
-    }
-
-    const preservedPosition = this.position.clone();
-    this.overridePivot = null;
-    this.setPosition(this.ensureSafePosition(preservedPosition));
+    this.clearOverridePivot();
   }
 
   /**
@@ -129,6 +117,48 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     if (this.upperBetaLimit === null || this.upperBetaLimit === undefined) {
       this.upperBetaLimit = Math.PI - defaultPadding;
     }
+  }
+
+  private applyOverridePivot(pivot: Vector3): void {
+    const pivotClone = pivot.clone();
+    if (this.overridePivot?.equalsWithEpsilon(pivotClone, 1e-6)) {
+      return;
+    }
+
+    const preservedPosition = this.position.clone();
+    if (!this.overridePivot) {
+      this.previousTargetBeforeOverride = this.target.clone();
+      if (!this.storedScreenOffset) {
+        this.storedScreenOffset = this.targetScreenOffset.clone();
+      }
+    }
+
+    this.overridePivot = pivotClone;
+    this.setTarget(pivotClone);
+    this.targetScreenOffset.set(0, 0);
+    this.setPosition(this.ensureSafePosition(preservedPosition));
+  }
+
+  private clearOverridePivot(): void {
+    if (!this.overridePivot) {
+      return;
+    }
+
+    const preservedPosition = this.position.clone();
+    const targetToRestore = this.previousTargetBeforeOverride ?? this.target.clone();
+
+    this.overridePivot = null;
+    this.previousTargetBeforeOverride = null;
+
+    if (this.storedScreenOffset) {
+      this.targetScreenOffset.copyFrom(this.storedScreenOffset);
+    } else {
+      this.targetScreenOffset.set(0, 0);
+    }
+    this.storedScreenOffset = null;
+
+    this.setTarget(targetToRestore);
+    this.setPosition(this.ensureSafePosition(preservedPosition));
   }
 
   private ensureSafePosition(position: Vector3): Vector3 {
