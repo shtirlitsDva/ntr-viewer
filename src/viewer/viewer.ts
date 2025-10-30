@@ -97,7 +97,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
     this.camera.attachControl(canvas, true);
-    this.camera.lowerRadiusLimit = 0.1;
+    this.camera.lowerRadiusLimit = 0.05;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
     this.camera.lowerBetaLimit = 0.01;
@@ -263,6 +263,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.camera.lowerRadiusLimit = 0.05;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -271,6 +272,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!adjusted) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.camera.lowerRadiusLimit = 0.05;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -290,7 +292,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     this.camera.target = center;
     this.camera.radius = radius;
-    this.camera.lowerRadiusLimit = Math.max(radius * 0.05, 0.5);
+      this.camera.lowerRadiusLimit = Math.max(radius * 0.02, 0.05);
     this.camera.maxZ = farPlane;
     this.camera.minZ = Math.max(radius * 0.01, 0.05);
   }
