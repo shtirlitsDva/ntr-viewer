@@ -20,6 +20,9 @@
         <button type="button" data-action="reset-view" class="toolbar-button">
           Reset (R)
         </button>
+        <button type="button" data-action="open-options" class="toolbar-button">
+          Options
+        </button>
         <label class="toolbar-field" for="color-mode-select">
           Color Mode
           <select id="color-mode-select" name="color-mode" data-control="color-mode">
@@ -64,6 +67,54 @@
         </aside>
       </div>
       <div class="toast-container" data-state="toasts"></div>
+      <div class="options-overlay" data-state="options-panel" hidden>
+        <div class="options-dialog" role="dialog" aria-modal="true" aria-labelledby="options-title">
+          <header class="options-header">
+            <h2 id="options-title">Viewer Options</h2>
+            <button type="button" class="options-close" data-action="close-options" aria-label="Close options">
+              ×
+            </button>
+          </header>
+          <div class="options-section">
+            <label class="options-field">
+              Rotation sensitivity
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                data-control="rotation-sensitivity"
+              />
+            </label>
+            <label class="options-field">
+              Pan sensitivity
+              <input
+                type="number"
+                min="0.1"
+                step="0.1"
+                data-control="pan-sensitivity"
+              />
+            </label>
+            <p class="options-help">Higher values rotate and pan faster.</p>
+          </div>
+          <form class="options-section options-load-form" data-action="manual-path-form">
+            <label class="options-field" for="manual-path-input">
+              Load NTR file
+            </label>
+            <div class="options-load-row">
+              <input
+                id="manual-path-input"
+                type="text"
+                placeholder="C:\path\to\model.ntr"
+                data-control="manual-path"
+                autocomplete="off"
+              />
+              <button type="submit" class="toolbar-button">
+                Load
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     </div>
   </body>
 </html>

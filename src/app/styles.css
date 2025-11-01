@@ -286,6 +286,112 @@ body {
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
+.options-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 8, 12, 0.7);
+  z-index: 1000;
+}
+
+.options-overlay[hidden] {
+  display: none;
+}
+
+.options-dialog {
+  width: min(420px, calc(100% - 32px));
+  background: #1a2130;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  color: #f5f7fa;
+}
+
+.options-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.options-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.options-close {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  border-radius: 999px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.options-close:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.options-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.options-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.options-field input {
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(6, 8, 12, 0.9);
+  color: inherit;
+  padding: 0.4rem 0.55rem;
+}
+
+.options-field input:focus {
+  outline: 2px solid #38bdf8;
+  outline-offset: 1px;
+}
+
+.options-help {
+  margin: -0.35rem 0 0;
+  font-size: 0.8rem;
+  color: rgba(230, 235, 255, 0.7);
+}
+
+.options-load-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.options-load-row input {
+  flex: 1;
+}
+
+.options-dialog .toolbar-button {
+  padding: 0.4rem 1rem;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 900px) {
   .side-panel {
     width: 260px;

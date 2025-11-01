@@ -1,4 +1,3 @@
-import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -14,6 +13,7 @@ import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
 
 import { RevitStylePointerInput } from "./RevitStylePointerInput.ts";
+import { PivotOrbitCamera } from "./camera/PivotOrbitCamera.ts";
 
 import type {
   SceneRenderer,
@@ -62,7 +62,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
   private readonly scene: Scene;
-  private readonly camera: ArcRotateCamera;
+  private readonly camera: PivotOrbitCamera;
+  private readonly pointerInput: RevitStylePointerInput;
   private readonly ground: Mesh;
   private readonly selectionListeners = new Set<SelectionListener>();
   private readonly elementMeshes = new Map<string, Mesh[]>();
@@ -87,7 +88,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
 
-    this.camera = new ArcRotateCamera(
+    this.camera = new PivotOrbitCamera(
       "camera",
       Math.PI / 4,
       Math.PI / 3,
@@ -96,14 +97,18 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
     this.camera.attachControl(canvas, true);
-    this.camera.lowerRadiusLimit = 0.1;
+    this.camera.lowerRadiusLimit = 0.05;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
+    this.camera.lowerBetaLimit = 0.01;
+    this.camera.upperBetaLimit = Math.PI - 0.01;
+    this.camera.allowUpsideDown = false;
     this.camera.wheelDeltaPercentage = 0.01;
     this.camera.panningSensibility = 50;
     this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
-    this.camera.inputs.add(new RevitStylePointerInput());
+    this.pointerInput = new RevitStylePointerInput();
+    this.camera.inputs.add(this.pointerInput);
 
     this.configureRenderingPipeline();
 
@@ -222,6 +227,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     }
     this.selectedElement = elementId;
     this.applySelectionColors();
+    this.updateCameraPivot();
     this.notifySelectionChanged();
   }
 
@@ -237,10 +243,27 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.ground.isVisible = visible && this.currentGraph?.bounds !== null;
   }
 
+  public getRotationSensitivity(): number {
+    return this.pointerInput.getRotationSensitivity();
+  }
+
+  public setRotationSensitivity(value: number): void {
+    this.pointerInput.setRotationSensitivity(value);
+  }
+
+  public getPanSensitivity(): number {
+    return this.pointerInput.getPanSensitivity();
+  }
+
+  public setPanSensitivity(value: number): void {
+    this.pointerInput.setPanSensitivity(value);
+  }
+
   public fitToBounds(bounds: SceneGraph["bounds"]): void {
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.camera.lowerRadiusLimit = 0.05;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -249,6 +272,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!adjusted) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
+      this.camera.lowerRadiusLimit = 0.05;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -268,7 +292,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     this.camera.target = center;
     this.camera.radius = radius;
-    this.camera.lowerRadiusLimit = Math.max(radius * 0.05, 0.5);
+      this.camera.lowerRadiusLimit = Math.max(radius * 0.02, 0.05);
     this.camera.maxZ = farPlane;
     this.camera.minZ = Math.max(radius * 0.01, 0.05);
   }
@@ -292,6 +316,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.elementMaterials.clear();
     this.elementProperties.clear();
     this.propertyColorCache.clear();
+    this.camera.setOverridePivot(null);
   }
 
   private updateGround(bounds: SceneGraph["bounds"]): void {
@@ -333,6 +358,56 @@ export class BabylonSceneRenderer implements SceneRenderer {
       const highlighted = this.selectedElement === id;
       this.applyMaterialColor(id, highlighted ? HIGHLIGHT_COLOR : baseColor, highlighted);
     }
+  }
+
+  private updateCameraPivot(): void {
+    if (!this.selectedElement) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    const meshes = this.elementMeshes.get(this.selectedElement);
+    if (!meshes || meshes.length === 0) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let minZ = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    let maxZ = Number.NEGATIVE_INFINITY;
+    let hasBounds = false;
+
+    for (const mesh of meshes) {
+      if (mesh.isDisposed()) {
+        continue;
+      }
+      mesh.refreshBoundingInfo();
+      const boundingInfo = mesh.getBoundingInfo();
+      const minimum = boundingInfo.boundingBox.minimumWorld;
+      const maximum = boundingInfo.boundingBox.maximumWorld;
+      minX = Math.min(minX, minimum.x);
+      minY = Math.min(minY, minimum.y);
+      minZ = Math.min(minZ, minimum.z);
+      maxX = Math.max(maxX, maximum.x);
+      maxY = Math.max(maxY, maximum.y);
+      maxZ = Math.max(maxZ, maximum.z);
+      hasBounds = true;
+    }
+
+    if (!hasBounds) {
+      this.camera.setOverridePivot(null);
+      return;
+    }
+
+    const center = new BabylonVector3(
+      (minX + maxX) / 2,
+      (minY + maxY) / 2,
+      (minZ + maxZ) / 2,
+    );
+    this.camera.setOverridePivot(center);
   }
 
   private applyMaterialColor(id: string, color: Color3, highlight: boolean): void {
