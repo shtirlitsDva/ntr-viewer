@@ -50,20 +50,24 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     const alphaDelta = newAlpha - currentAlpha;
     const betaDelta = newBeta - currentBeta;
 
+    const up = this.upVector;
     const yawMatrix = Matrix.Identity();
-    Quaternion.RotationAxis(Vector3.UpReadOnly, alphaDelta).toRotationMatrix(yawMatrix);
+    Quaternion.RotationAxis(up, alphaDelta).toRotationMatrix(yawMatrix);
     let rotatedPosition = Vector3.TransformCoordinates(pivotToPosition, yawMatrix);
     let rotatedTarget = Vector3.TransformCoordinates(pivotToTarget, yawMatrix);
 
     if (Math.abs(betaDelta) > PivotOrbitCamera.EPSILON) {
-      let right = Vector3.Cross(rotatedPosition, Vector3.UpReadOnly);
+      // Use camera forward (target - position) to compute the correct right axis for pitching
+      const forward = rotatedTarget.subtract(rotatedPosition);
+      let right = Vector3.Cross(forward, up);
       if (right.lengthSquared() < PivotOrbitCamera.EPSILON) {
-        right = new Vector3(1, 0, 0);
-      } else {
-        right.normalize();
+        // forward is parallel to up; pick a stable axis perpendicular to up
+        const arbitrary = Math.abs(up.y) < 0.99 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
+        right = Vector3.Cross(arbitrary, up);
       }
+      right.normalize();
       const pitchMatrix = Matrix.Identity();
-      Quaternion.RotationAxis(right, betaDelta).toRotationMatrix(pitchMatrix);
+      Quaternion.RotationAxis(right, -betaDelta).toRotationMatrix(pitchMatrix);
       rotatedPosition = Vector3.TransformCoordinates(rotatedPosition, pitchMatrix);
       rotatedTarget = Vector3.TransformCoordinates(rotatedTarget, pitchMatrix);
     }
