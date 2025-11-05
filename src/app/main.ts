@@ -4,7 +4,7 @@ import {
   startFileWatch,
   stopFileWatch,
 } from "@app/api/files";
-import { initializeTelemetry, recordTelemetry, setTelemetryEnabled } from "@app/telemetry";
+import { recordTelemetry, setTelemetryEnabled } from "@app/telemetry";
 import { parseNtr } from "@ntr/parser";
 import type { ParseIssue } from "@ntr/model";
 import {
@@ -19,11 +19,24 @@ import {
   type FileWatchManager,
 } from "./fileWatch.ts";
 import { createFileDropManager, type FileDropManager } from "./fileDrop.ts";
+import { attachToolbar, type ToolbarController } from "./toolbar.ts";
+import {
+  attachKeyboardShortcuts,
+  type KeyboardShortcutController,
+} from "./keyboardShortcuts.ts";
+import {
+  createOptionsPanelController,
+  DEFAULT_SETTINGS,
+  readViewerSettings,
+  type OptionsPanelController,
+} from "./optionsPanel.ts";
+import { createToastManager, type ToastManager } from "./toastManager.ts";
+import { initializeTelemetryToggle } from "./telemetryPreferences.ts";
 import { createViewerHost, type ViewerHost } from "./viewerHost.ts";
 import type { ColorMode } from "@viewer/engine";
 import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine";
 import { isOk } from "@shared/result";
-import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
+import { createToast, publishToast } from "@shared/toast";
 import { InitializeCSG2Async } from "@babylonjs/core/Meshes/csg2";
 
 interface AppState {
@@ -58,27 +71,17 @@ let panSensitivityInput: HTMLInputElement;
 let manualPathForm: HTMLFormElement;
 let manualPathInput: HTMLInputElement;
 let currentColorMode: ColorMode = "type";
-let optionsVisible = false;
-let optionsPreviousFocus: HTMLElement | null = null;
-
-const activeToasts = new Map<string, HTMLElement>();
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
 const SETTINGS_STORAGE_KEY = "ntr-viewer:options";
-
-interface PersistedSettings {
-  readonly rotationSensitivity: number;
-  readonly panSensitivity: number;
-}
-
-const DEFAULT_SETTINGS: PersistedSettings = {
-  rotationSensitivity: 1,
-  panSensitivity: 1,
-};
 
 type LoadSource = "manual" | "restore" | "watch";
 
 let fileWatchManager: FileWatchManager | null = null;
 let fileDropManager: FileDropManager | null = null;
+let toolbarController: ToolbarController | null = null;
+let keyboardController: KeyboardShortcutController | null = null;
+let optionsPanelController: OptionsPanelController | null = null;
+let toastManager: ToastManager | null = null;
 
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
@@ -249,6 +252,9 @@ const initialize = async () => {
   panSensitivityInput = queryElement<HTMLInputElement>('[data-control="pan-sensitivity"]');
   manualPathForm = queryElement<HTMLFormElement>('[data-action="manual-path-form"]');
   manualPathInput = queryElement<HTMLInputElement>('[data-control="manual-path"]');
+  const openFileButton = queryElement<HTMLButtonElement>('[data-action="open-file"]');
+  const fitViewButton = queryElement<HTMLButtonElement>('[data-action="fit-view"]');
+  const resetViewButton = queryElement<HTMLButtonElement>('[data-action="reset-view"]');
 
   viewerHost?.dispose();
   viewerHost = createViewerHost({
@@ -259,17 +265,82 @@ const initialize = async () => {
   if (!viewerHost) {
     throw new Error("Failed to initialize viewer host");
   }
-  const persistedSettings = getPersistedSettings();
+  const persistedSettings = readViewerSettings(SETTINGS_STORAGE_KEY, DEFAULT_SETTINGS);
   viewerHost.setRotationSensitivity(persistedSettings.rotationSensitivity);
   viewerHost.setPanSensitivity(persistedSettings.panSensitivity);
-  refreshOptionsValues();
   updateColorModeOptions([]);
 
-  setupToolbar();
-  setupOptionsPanel();
-  setupKeyboardShortcuts();
-  setupToasts();
-  initializeTelemetryPreferences();
+  toolbarController?.dispose();
+  toolbarController = attachToolbar(
+    {
+      openFileButton,
+      fitViewButton,
+      resetViewButton,
+      optionsToggleButton: optionsOpenButton,
+      colorModeSelect,
+      gridToggle,
+      telemetryToggle,
+    },
+    {
+      onOpenFile: () => handleOpenFile(),
+      onFitView: () => fitToCurrentBounds(),
+      onResetView: () => {
+        viewerHost?.setSelection(null);
+        fitToCurrentBounds();
+      },
+      onOptionsToggle: () => {
+        optionsPanelController?.toggle();
+      },
+      onColorModeChange: (mode) => {
+        currentColorMode = mode;
+        viewerHost?.setColorMode(mode);
+      },
+      onGridToggle: (visible) => {
+        viewerHost?.setGridVisible(visible);
+      },
+      onTelemetryToggle: (enabled) => {
+        setTelemetryEnabled(enabled);
+        publishToast(createToast("info", enabled ? "Telemetry enabled" : "Telemetry disabled"));
+      },
+    },
+  );
+  keyboardController?.dispose();
+  keyboardController = attachKeyboardShortcuts(
+    { gridToggle },
+    {
+      onFitView: () => fitToCurrentBounds(),
+      onResetView: () => {
+        viewerHost?.setSelection(null);
+        fitToCurrentBounds();
+      },
+      onClearSelection: () => {
+        viewerHost?.setSelection(null);
+      },
+      onToggleGrid: (visible) => {
+        viewerHost?.setGridVisible(visible);
+      },
+    },
+  );
+  optionsPanelController?.dispose();
+  optionsPanelController = createOptionsPanelController({
+    panel: optionsPanel,
+    closeButton: optionsCloseButton,
+    rotationInput: rotationSensitivityInput,
+    panInput: panSensitivityInput,
+    manualPathForm,
+    manualPathInput,
+    storageKey: SETTINGS_STORAGE_KEY,
+    defaultSettings: DEFAULT_SETTINGS,
+    getViewerHost: () => viewerHost,
+    loadFileFromPath: (path) => handleLoadFileFromPath(path),
+    notifyWarning: (message) => {
+      publishToast(createToast("warning", message));
+    },
+  });
+  optionsPanelController.refresh();
+  toastManager?.dispose();
+  toastManager = createToastManager({ container: toastContainer });
+  initializeTelemetryToggle(telemetryToggle);
   renderFilePath(null);
   renderSelection(null);
   renderIssues([]);
@@ -282,210 +353,6 @@ const queryElement = <T extends Element>(selector: string): T => {
   }
   return element;
 };
-
-const setupToolbar = () => {
-  queryElement<HTMLButtonElement>('[data-action="open-file"]').addEventListener("click", () => {
-    void handleOpenFile();
-  });
-
-  queryElement<HTMLButtonElement>('[data-action="fit-view"]').addEventListener("click", () => {
-    fitToCurrentBounds();
-  });
-
-  queryElement<HTMLButtonElement>('[data-action="reset-view"]').addEventListener("click", () => {
-    viewerHost?.setSelection(null);
-    fitToCurrentBounds();
-  });
-
-  optionsOpenButton.addEventListener("click", () => {
-    if (optionsVisible) {
-      hideOptionsPanel();
-    } else {
-      showOptionsPanel();
-    }
-  });
-
-  colorModeSelect.addEventListener("change", (event) => {
-    const select = event.target as HTMLSelectElement;
-    currentColorMode = select.value as ColorMode;
-    viewerHost?.setColorMode(currentColorMode);
-  });
-
-  gridToggle.addEventListener("change", () => {
-    viewerHost?.setGridVisible(gridToggle.checked);
-  });
-
-  telemetryToggle.addEventListener("change", () => {
-    setTelemetryEnabled(telemetryToggle.checked);
-    publishToast(
-      createToast(
-        "info",
-        telemetryToggle.checked
-          ? "Telemetry enabled"
-          : "Telemetry disabled",
-      ),
-    );
-  });
-};
-
-const formatNumberForInput = (value: number): string => {
-  if (!Number.isFinite(value)) {
-    return "1";
-  }
-  const rounded = Math.round(value * 100) / 100;
-  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(2).replace(/(?:\.0+|0+)$/, "");
-};
-
-const getPersistedSettings = (): PersistedSettings => {
-  try {
-    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!raw) {
-      return DEFAULT_SETTINGS;
-    }
-    const parsed = JSON.parse(raw) as Partial<PersistedSettings>;
-    const rotation = Number(parsed.rotationSensitivity);
-    const pan = Number(parsed.panSensitivity);
-    return {
-      rotationSensitivity:
-        Number.isFinite(rotation) && rotation > 0 ? rotation : DEFAULT_SETTINGS.rotationSensitivity,
-      panSensitivity: Number.isFinite(pan) && pan > 0 ? pan : DEFAULT_SETTINGS.panSensitivity,
-    };
-  } catch (error) {
-    console.warn("Failed to read viewer options", error);
-    return DEFAULT_SETTINGS;
-  }
-};
-
-const persistSettings = (settings: PersistedSettings) => {
-  try {
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  } catch (error) {
-    console.warn("Failed to persist viewer options", error);
-  }
-};
-
-function refreshOptionsValues(): void {
-  const host = viewerHost;
-  const settings = host
-    ? {
-        rotationSensitivity: host.getRotationSensitivity(),
-        panSensitivity: host.getPanSensitivity(),
-      }
-    : getPersistedSettings();
-  rotationSensitivityInput.value = formatNumberForInput(settings.rotationSensitivity);
-  panSensitivityInput.value = formatNumberForInput(settings.panSensitivity);
-}
-
-function handleOptionsKeydown(event: KeyboardEvent): void {
-  if (event.key === "Escape") {
-    event.preventDefault();
-    hideOptionsPanel();
-  }
-}
-
-function showOptionsPanel(): void {
-  if (optionsVisible) {
-    return;
-  }
-  refreshOptionsValues();
-  optionsPreviousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  optionsPanel.removeAttribute("hidden");
-  optionsPanel.classList.add("visible");
-  optionsVisible = true;
-  optionsCloseButton.focus();
-  document.addEventListener("keydown", handleOptionsKeydown);
-}
-
-function hideOptionsPanel(): void {
-  if (!optionsVisible) {
-    return;
-  }
-  const host = viewerHost;
-  persistSettings({
-    rotationSensitivity: host?.getRotationSensitivity() ?? DEFAULT_SETTINGS.rotationSensitivity,
-    panSensitivity: host?.getPanSensitivity() ?? DEFAULT_SETTINGS.panSensitivity,
-  });
-  optionsPanel.classList.remove("visible");
-  optionsPanel.setAttribute("hidden", "");
-  optionsVisible = false;
-  document.removeEventListener("keydown", handleOptionsKeydown);
-  if (optionsPreviousFocus) {
-    optionsPreviousFocus.focus();
-    optionsPreviousFocus = null;
-  }
-}
-
-function applyRotationInput(): void {
-  const host = viewerHost;
-  if (!host) {
-    return;
-  }
-  const current = host.getRotationSensitivity();
-  const parsed = Number(rotationSensitivityInput.value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    rotationSensitivityInput.value = formatNumberForInput(current);
-    return;
-  }
-  host.setRotationSensitivity(parsed);
-  rotationSensitivityInput.value = formatNumberForInput(host.getRotationSensitivity());
-  persistSettings({
-    rotationSensitivity: host.getRotationSensitivity(),
-    panSensitivity: host.getPanSensitivity(),
-  });
-}
-
-function applyPanInput(): void {
-  const host = viewerHost;
-  if (!host) {
-    return;
-  }
-  const current = host.getPanSensitivity();
-  const parsed = Number(panSensitivityInput.value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    panSensitivityInput.value = formatNumberForInput(current);
-    return;
-  }
-  host.setPanSensitivity(parsed);
-  panSensitivityInput.value = formatNumberForInput(host.getPanSensitivity());
-  persistSettings({
-    rotationSensitivity: host.getRotationSensitivity(),
-    panSensitivity: host.getPanSensitivity(),
-  });
-}
-
-function handleManualPathSubmit(event: SubmitEvent): void {
-  event.preventDefault();
-  const path = manualPathInput.value.trim();
-  if (!path) {
-    publishToast(createToast("warning", "Enter a file path to load."));
-    manualPathInput.focus();
-    return;
-  }
-  void (async () => {
-    const success = await handleLoadFileFromPath(path);
-    if (success) {
-      manualPathInput.value = "";
-      hideOptionsPanel();
-    }
-  })();
-}
-
-function setupOptionsPanel(): void {
-  optionsPanel.addEventListener("click", (event) => {
-    if (event.target === optionsPanel) {
-      hideOptionsPanel();
-    }
-  });
-  optionsCloseButton.addEventListener("click", () => {
-    hideOptionsPanel();
-  });
-  rotationSensitivityInput.addEventListener("change", applyRotationInput);
-  rotationSensitivityInput.addEventListener("blur", applyRotationInput);
-  panSensitivityInput.addEventListener("change", applyPanInput);
-  panSensitivityInput.addEventListener("blur", applyPanInput);
-  manualPathForm.addEventListener("submit", handleManualPathSubmit);
-  refreshOptionsValues();
-}
 
 const updateColorModeOptions = (propertyNames: readonly string[]) => {
   if (!colorModeSelect) {
@@ -523,86 +390,6 @@ const ensureValidColorMode = (
     return desired;
   }
   return propertyNames.includes(property) ? desired : "type";
-};
-
-const setupKeyboardShortcuts = () => {
-  window.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (target && (target.tagName === "INPUT" || target.tagName === "SELECT")) {
-      return;
-    }
-
-    switch (event.key.toLowerCase()) {
-      case "f":
-        fitToCurrentBounds();
-        event.preventDefault();
-        break;
-      case "r":
-        viewerHost?.setSelection(null);
-        fitToCurrentBounds();
-        event.preventDefault();
-        break;
-      case "escape":
-        viewerHost?.setSelection(null);
-        event.preventDefault();
-        break;
-      case "g":
-        gridToggle.checked = !gridToggle.checked;
-        viewerHost?.setGridVisible(gridToggle.checked);
-        event.preventDefault();
-        break;
-      default:
-        break;
-    }
-  });
-};
-
-const setupToasts = () => {
-  subscribeToToasts((toast) => {
-    const element = document.createElement("div");
-    element.className = `toast toast-${toast.level}`;
-
-    const message = document.createElement("p");
-    message.className = "toast-message";
-    message.textContent = toast.message;
-    element.append(message);
-
-    if (toast.detail) {
-      const detail = document.createElement("p");
-      detail.className = "toast-detail";
-      detail.textContent = toast.detail;
-      element.append(detail);
-    }
-
-    const closeButton = document.createElement("button");
-    closeButton.type = "button";
-    closeButton.setAttribute("aria-label", "Dismiss notification");
-    closeButton.textContent = "×";
-    closeButton.addEventListener("click", () => dismissToast(toast.id));
-    element.append(closeButton);
-
-    toastContainer.append(element);
-    activeToasts.set(toast.id, element);
-
-    window.setTimeout(() => dismissToast(toast.id), 5000);
-  });
-};
-
-const dismissToast = (id: string) => {
-  const element = activeToasts.get(id);
-  if (!element) {
-    return;
-  }
-  element.classList.add("toast-closing");
-  window.setTimeout(() => {
-    element.remove();
-    activeToasts.delete(id);
-  }, 150);
-};
-
-const initializeTelemetryPreferences = () => {
-  const enabled = initializeTelemetry();
-  telemetryToggle.checked = enabled;
 };
 
 const loadFileFromContents = (path: string, contents: string, source: LoadSource): boolean => {
@@ -989,6 +776,10 @@ window.addEventListener("DOMContentLoaded", () => {
 window.addEventListener("beforeunload", () => {
   fileWatchManager?.dispose();
   fileDropManager?.dispose();
+  toolbarController?.dispose();
+  keyboardController?.dispose();
+  optionsPanelController?.dispose();
+  toastManager?.dispose();
   viewerHost?.dispose();
   void stopFileWatch().catch(reportWatchStopFailure);
 });
