@@ -659,11 +659,11 @@ const handleFileWatchError = (payload: FileChangePayload) => {
 const setupFileWatchListeners = async () => {
   try {
     unlistenFileChange?.();
-    unlistenFileChange = await listen<FileChangePayload>("ntr-file-changed", async (event) => {
+    unlistenFileChange = await listen<FileChangePayload>("ntr-file-changed", (event) => {
       if (import.meta.env.DEV) {
         console.debug("[watch] change", event.payload.kind, event.payload.path);
       }
-      await handleFileChangeEvent(event.payload);
+      void handleFileChangeEvent(event.payload);
     });
 
     unlistenWatchError?.();
@@ -692,27 +692,22 @@ const setupFileDropListeners = async () => {
     });
     unlistenFileDrop = [];
 
-    let highlightDispose: () => void;
-    let overDispose: () => void;
-    let leaveDispose: () => void;
-    let dropDispose: () => void;
-
-    highlightDispose = await listen<string[]>(TauriEvent.DRAG_ENTER, (event) => {
+    const highlightDispose = await listen<string[]>(TauriEvent.DRAG_ENTER, (event) => {
       if (import.meta.env.DEV) {
         console.debug("[drag-drop] drag enter", (event as unknown as { payload?: string[] }).payload);
       }
     });
-    overDispose = await listen<string[]>(TauriEvent.DRAG_OVER, (event) => {
+    const overDispose = await listen<string[]>(TauriEvent.DRAG_OVER, (event) => {
       if (import.meta.env.DEV) {
         console.debug("[drag-drop] drag over", (event as unknown as { payload?: string[] }).payload);
       }
     });
-    leaveDispose = await listen<string[]>(TauriEvent.DRAG_LEAVE, () => {
+    const leaveDispose = await listen<string[]>(TauriEvent.DRAG_LEAVE, () => {
       if (import.meta.env.DEV) {
         console.debug("[drag-drop] drag leave");
       }
     });
-    dropDispose = await listen<string[]>(TauriEvent.DRAG_DROP, (event) => {
+    const dropDispose = await listen<string[]>(TauriEvent.DRAG_DROP, (event) => {
       const payload = (event as unknown as { payload?: { paths: string[] } }).payload;
       if (import.meta.env.DEV) {
         console.debug("[drag-drop] drag drop", payload);

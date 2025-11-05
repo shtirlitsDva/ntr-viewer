@@ -9,6 +9,7 @@ export default tseslint.config(
       "src-tauri/gen",
       "node_modules",
       "eslint.config.js",
+      "data/arcRotateCamera.ts",
     ],
   },
   js.configs.recommended,

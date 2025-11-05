@@ -46,6 +46,8 @@ export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
 const MSAA_SAMPLES = 4;
+const MIN_CAMERA_RADIUS = 0.025;
+const WHEEL_ZOOM_RATE = 0.002;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -56,7 +58,7 @@ interface TubeOptions {
   readonly endDiameter?: number;
 }
 
-export interface BabylonRendererOptions {}
+export type BabylonRendererOptions = Record<string, never>;
 
 export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -83,6 +85,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private sceneOffset = new BabylonVector3(0, 0, 0);
 
   public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
+    void _options;
     this.canvas = canvas;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false }, true);
     this.scene = new Scene(this.engine);
@@ -97,7 +100,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.scene,
     );
     this.camera.attachControl(canvas, true);
-    this.camera.lowerRadiusLimit = 0.05;
+    this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
     this.camera.lowerBetaLimit = 0.01;
@@ -263,7 +266,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
-      this.camera.lowerRadiusLimit = 0.05;
+      this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -272,7 +275,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!adjusted) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
-      this.camera.lowerRadiusLimit = 0.05;
+      this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
       this.updateCameraClipping(bounds);
       return;
     }
@@ -292,7 +295,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     this.camera.target = center;
     this.camera.radius = radius;
-      this.camera.lowerRadiusLimit = Math.max(radius * 0.02, 0.05);
+    this.camera.lowerRadiusLimit = Math.max(radius * 0.01, MIN_CAMERA_RADIUS);
     this.camera.maxZ = farPlane;
     this.camera.minZ = Math.max(radius * 0.01, 0.05);
   }
@@ -639,7 +642,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   if (measuredRadius <= 1e-6) return null;
 
   const axisX = startOffset.scale(1 / measuredRadius);
-  let axisY = BabylonVector3.Cross(planeNormal, axisX);
+  const axisY = BabylonVector3.Cross(planeNormal, axisX);
   if (axisY.lengthSquared() < 1e-6) return null;
   axisY.normalize();
 
@@ -792,7 +795,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
 
       event.preventDefault();
-      const zoomFactor = Math.exp(event.deltaY * 0.001);
+      const zoomFactor = Math.exp(event.deltaY * WHEEL_ZOOM_RATE);
       const lowerLimit = this.camera.lowerRadiusLimit ?? 0.1;
       const upperLimit = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
       const targetRadius = this.camera.radius * zoomFactor;
