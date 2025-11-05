@@ -13,13 +13,17 @@ import {
   type SceneElement,
   type SceneGraph,
 } from "@viewer/sceneGraph";
-import { createBabylonRenderer } from "@viewer/viewer";
-// import { createHighTessellationRenderer } from "@viewer/renderers";
-import type { ColorMode, SceneRenderer } from "@viewer/engine";
+import {
+  createFileWatchManager,
+  type FileChangePayload,
+  type FileWatchManager,
+} from "./fileWatch.ts";
+import { createFileDropManager, type FileDropManager } from "./fileDrop.ts";
+import { createViewerHost, type ViewerHost } from "./viewerHost.ts";
+import type { ColorMode } from "@viewer/engine";
 import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine";
 import { isOk } from "@shared/result";
 import { createToast, publishToast, subscribeToToasts } from "@shared/toast";
-import { listen, TauriEvent } from "@tauri-apps/api/event";
 import { InitializeCSG2Async } from "@babylonjs/core/Meshes/csg2";
 
 interface AppState {
@@ -30,7 +34,7 @@ interface AppState {
   elementProperties: Map<string, Record<string, string>>;
 }
 
-let renderer: SceneRenderer | null = null;
+let viewerHost: ViewerHost | null = null;
 let state: AppState = {
   filePath: null,
   issues: [],
@@ -71,16 +75,10 @@ const DEFAULT_SETTINGS: PersistedSettings = {
   panSensitivity: 1,
 };
 
-interface FileChangePayload {
-  readonly path: string;
-  readonly kind: string;
-}
-
 type LoadSource = "manual" | "restore" | "watch";
 
-let unlistenFileChange: (() => void) | null = null;
-let unlistenWatchError: (() => void) | null = null;
-let unlistenFileDrop: Array<() => void> = [];
+let fileWatchManager: FileWatchManager | null = null;
+let fileDropManager: FileDropManager | null = null;
 
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
@@ -119,6 +117,74 @@ const getRememberedFile = (): string | null => {
   } catch (error) {
     console.warn("Failed to read last file path", error);
     return null;
+  }
+};
+
+const describeError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return "Unknown error";
+};
+
+const reportWatchStartFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.warn("Failed to start file watch", error);
+  publishToast(createToast("warning", "Live reload unavailable", detail));
+};
+
+const reportWatchStopFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.warn("Failed to stop file watch", error);
+  publishToast(createToast("warning", "Live reload cleanup failed", detail));
+};
+
+const reportFileChangeHandlingFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.error("Failed processing file change event", error);
+  publishToast(createToast("error", "File change handling failed", detail));
+};
+
+const reportDropHandlingFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.error("Failed processing dropped file", error);
+  publishToast(createToast("error", "Failed to open dropped file", detail));
+};
+
+const reportDropSetupFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.warn("Failed to set up file drop listeners", error);
+  publishToast(createToast("warning", "Drag-and-drop unavailable", detail));
+};
+
+const reportWatchSubscriptionFailure = (error: unknown) => {
+  const detail = describeError(error);
+  console.warn("Failed to subscribe to file watch events", error);
+  publishToast(createToast("warning", "File change monitoring unavailable", detail));
+};
+
+const getFileWatchManager = (): FileWatchManager => {
+  if (!fileWatchManager) {
+    fileWatchManager = createFileWatchManager({
+      onFileChanged: handleFileChangeEvent,
+      onWatchError: handleFileWatchError,
+      onProcessingError: reportFileChangeHandlingFailure,
+      onSetupFailed: reportWatchSubscriptionFailure,
+    });
+  }
+  return fileWatchManager;
+};
+
+const setupFileWatchListeners = async (): Promise<void> => {
+  try {
+    await getFileWatchManager().setup();
+  } catch (error) {
+    if (import.meta.env.DEV) {
+      console.warn("File watch listener setup failed", error);
+    }
   }
 };
 
@@ -161,8 +227,7 @@ const resetViewerState = () => {
   };
   currentColorMode = "type";
   updateColorModeOptions([]);
-  renderer?.load({ elements: [], bounds: null });
-  renderer?.setSelection(null);
+  viewerHost?.resetScene();
   renderFilePath(null);
   renderSelection(null);
   renderIssues([]);
@@ -185,14 +250,18 @@ const initialize = async () => {
   manualPathForm = queryElement<HTMLFormElement>('[data-action="manual-path-form"]');
   manualPathInput = queryElement<HTMLInputElement>('[data-control="manual-path"]');
 
-  // Swap renderer factories here for experimentation:
-  renderer = createBabylonRenderer(getCanvas());
-  // renderer = createHighTessellationRenderer(getCanvas());
-  renderer.onSelectionChanged(handleSelectionChange);
-  renderer.setGridVisible(gridToggle.checked);
+  viewerHost?.dispose();
+  viewerHost = createViewerHost({
+    canvas: getCanvas(),
+    onSelectionChanged: handleSelectionChange,
+    initialGridVisible: gridToggle.checked,
+  });
+  if (!viewerHost) {
+    throw new Error("Failed to initialize viewer host");
+  }
   const persistedSettings = getPersistedSettings();
-  renderer.setRotationSensitivity(persistedSettings.rotationSensitivity);
-  renderer.setPanSensitivity(persistedSettings.panSensitivity);
+  viewerHost.setRotationSensitivity(persistedSettings.rotationSensitivity);
+  viewerHost.setPanSensitivity(persistedSettings.panSensitivity);
   refreshOptionsValues();
   updateColorModeOptions([]);
 
@@ -224,7 +293,7 @@ const setupToolbar = () => {
   });
 
   queryElement<HTMLButtonElement>('[data-action="reset-view"]').addEventListener("click", () => {
-    renderer?.setSelection(null);
+    viewerHost?.setSelection(null);
     fitToCurrentBounds();
   });
 
@@ -239,11 +308,11 @@ const setupToolbar = () => {
   colorModeSelect.addEventListener("change", (event) => {
     const select = event.target as HTMLSelectElement;
     currentColorMode = select.value as ColorMode;
-    renderer?.setColorMode(currentColorMode);
+    viewerHost?.setColorMode(currentColorMode);
   });
 
   gridToggle.addEventListener("change", () => {
-    renderer?.setGridVisible(gridToggle.checked);
+    viewerHost?.setGridVisible(gridToggle.checked);
   });
 
   telemetryToggle.addEventListener("change", () => {
@@ -296,10 +365,11 @@ const persistSettings = (settings: PersistedSettings) => {
 };
 
 function refreshOptionsValues(): void {
-  const settings = renderer
+  const host = viewerHost;
+  const settings = host
     ? {
-        rotationSensitivity: renderer.getRotationSensitivity(),
-        panSensitivity: renderer.getPanSensitivity(),
+        rotationSensitivity: host.getRotationSensitivity(),
+        panSensitivity: host.getPanSensitivity(),
       }
     : getPersistedSettings();
   rotationSensitivityInput.value = formatNumberForInput(settings.rotationSensitivity);
@@ -330,9 +400,10 @@ function hideOptionsPanel(): void {
   if (!optionsVisible) {
     return;
   }
+  const host = viewerHost;
   persistSettings({
-    rotationSensitivity: renderer?.getRotationSensitivity() ?? DEFAULT_SETTINGS.rotationSensitivity,
-    panSensitivity: renderer?.getPanSensitivity() ?? DEFAULT_SETTINGS.panSensitivity,
+    rotationSensitivity: host?.getRotationSensitivity() ?? DEFAULT_SETTINGS.rotationSensitivity,
+    panSensitivity: host?.getPanSensitivity() ?? DEFAULT_SETTINGS.panSensitivity,
   });
   optionsPanel.classList.remove("visible");
   optionsPanel.setAttribute("hidden", "");
@@ -345,38 +416,40 @@ function hideOptionsPanel(): void {
 }
 
 function applyRotationInput(): void {
-  if (!renderer) {
+  const host = viewerHost;
+  if (!host) {
     return;
   }
-  const current = renderer.getRotationSensitivity();
+  const current = host.getRotationSensitivity();
   const parsed = Number(rotationSensitivityInput.value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     rotationSensitivityInput.value = formatNumberForInput(current);
     return;
   }
-  renderer.setRotationSensitivity(parsed);
-  rotationSensitivityInput.value = formatNumberForInput(renderer.getRotationSensitivity());
+  host.setRotationSensitivity(parsed);
+  rotationSensitivityInput.value = formatNumberForInput(host.getRotationSensitivity());
   persistSettings({
-    rotationSensitivity: renderer.getRotationSensitivity(),
-    panSensitivity: renderer.getPanSensitivity(),
+    rotationSensitivity: host.getRotationSensitivity(),
+    panSensitivity: host.getPanSensitivity(),
   });
 }
 
 function applyPanInput(): void {
-  if (!renderer) {
+  const host = viewerHost;
+  if (!host) {
     return;
   }
-  const current = renderer.getPanSensitivity();
+  const current = host.getPanSensitivity();
   const parsed = Number(panSensitivityInput.value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     panSensitivityInput.value = formatNumberForInput(current);
     return;
   }
-  renderer.setPanSensitivity(parsed);
-  panSensitivityInput.value = formatNumberForInput(renderer.getPanSensitivity());
+  host.setPanSensitivity(parsed);
+  panSensitivityInput.value = formatNumberForInput(host.getPanSensitivity());
   persistSettings({
-    rotationSensitivity: renderer.getRotationSensitivity(),
-    panSensitivity: renderer.getPanSensitivity(),
+    rotationSensitivity: host.getRotationSensitivity(),
+    panSensitivity: host.getPanSensitivity(),
   });
 }
 
@@ -431,7 +504,7 @@ const updateColorModeOptions = (propertyNames: readonly string[]) => {
   const validated = ensureValidColorMode(previousMode, propertyNames);
   currentColorMode = validated;
   colorModeSelect.value = validated;
-  renderer?.setColorMode(validated);
+  viewerHost?.setColorMode(validated);
 };
 
 const addColorModeOption = (value: ColorMode, label: string) => {
@@ -465,17 +538,17 @@ const setupKeyboardShortcuts = () => {
         event.preventDefault();
         break;
       case "r":
-        renderer?.setSelection(null);
+        viewerHost?.setSelection(null);
         fitToCurrentBounds();
         event.preventDefault();
         break;
       case "escape":
-        renderer?.setSelection(null);
+        viewerHost?.setSelection(null);
         event.preventDefault();
         break;
       case "g":
         gridToggle.checked = !gridToggle.checked;
-        renderer?.setGridVisible(gridToggle.checked);
+        viewerHost?.setGridVisible(gridToggle.checked);
         event.preventDefault();
         break;
       default:
@@ -545,8 +618,7 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
     };
     currentColorMode = "type";
     updateColorModeOptions([]);
-    renderer?.load({ elements: [], bounds: null });
-    renderer?.setSelection(null);
+    viewerHost?.resetScene();
     renderFilePath(path);
     renderSelection(null);
     renderIssues(state.issues);
@@ -566,7 +638,7 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
 
     if (source === "restore") {
       forgetLastFile();
-      void stopFileWatch();
+      void stopFileWatch().catch(reportWatchStopFailure);
     }
 
     return false;
@@ -582,9 +654,9 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
     elementProperties: propertyData.elementProperties,
   };
 
-  renderer?.load(graph, { maintainCamera: source === "watch" });
+  viewerHost?.load(graph, { maintainCamera: source === "watch" });
   updateColorModeOptions(state.propertyNames);
-  renderer?.setSelection(null);
+  viewerHost?.setSelection(null);
   renderFilePath(path);
   renderSelection(null);
   renderIssues(state.issues);
@@ -611,7 +683,7 @@ const loadFileFromContents = (path: string, contents: string, source: LoadSource
 
   rememberLastFile(path);
   if (source !== "watch") {
-    void startFileWatch(path);
+    void startFileWatch(path).catch(reportWatchStartFailure);
   }
   return true;
 };
@@ -656,73 +728,49 @@ const handleFileWatchError = (payload: FileChangePayload) => {
   );
 };
 
-const setupFileWatchListeners = async () => {
-  try {
-    unlistenFileChange?.();
-    unlistenFileChange = await listen<FileChangePayload>("ntr-file-changed", (event) => {
-      if (import.meta.env.DEV) {
-        console.debug("[watch] change", event.payload.kind, event.payload.path);
-      }
-      void handleFileChangeEvent(event.payload);
-    });
-
-    unlistenWatchError?.();
-    unlistenWatchError = await listen<FileChangePayload>(
-      "ntr-file-watch-error",
-      (event) => {
+const getFileDropManager = (): FileDropManager => {
+  if (!fileDropManager) {
+    fileDropManager = createFileDropManager({
+      onEnter: (payload) => {
         if (import.meta.env.DEV) {
-          console.warn("[watch] error", event.payload.kind, event.payload.path);
+          console.debug("[drag-drop] drag enter", payload ?? []);
         }
-        handleFileWatchError(event.payload);
       },
-    );
-  } catch (error) {
-    console.warn("Failed to set up file watch listeners", error);
+      onOver: (payload) => {
+        if (import.meta.env.DEV) {
+          console.debug("[drag-drop] drag over", payload ?? []);
+        }
+      },
+      onLeave: () => {
+        if (import.meta.env.DEV) {
+          console.debug("[drag-drop] drag leave");
+        }
+      },
+      onDrop: async (paths) => {
+        if (import.meta.env.DEV) {
+          console.debug("[drag-drop] drag drop", paths);
+        }
+        const [path] = paths;
+        if (!path) {
+          publishToast(createToast("warning", "Dropped file path unavailable"));
+          return;
+        }
+        await handleDroppedFile(path);
+      },
+      onProcessingError: reportDropHandlingFailure,
+      onSetupFailed: reportDropSetupFailure,
+    });
   }
+  return fileDropManager;
 };
 
-const setupFileDropListeners = async () => {
+const setupFileDropListeners = async (): Promise<void> => {
   try {
-    unlistenFileDrop.forEach((dispose) => {
-      try {
-        dispose();
-      } catch (error) {
-        console.warn("Failed disposing file drop listener", error);
-      }
-    });
-    unlistenFileDrop = [];
-
-    const highlightDispose = await listen<string[]>(TauriEvent.DRAG_ENTER, (event) => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] drag enter", (event as unknown as { payload?: string[] }).payload);
-      }
-    });
-    const overDispose = await listen<string[]>(TauriEvent.DRAG_OVER, (event) => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] drag over", (event as unknown as { payload?: string[] }).payload);
-      }
-    });
-    const leaveDispose = await listen<string[]>(TauriEvent.DRAG_LEAVE, () => {
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] drag leave");
-      }
-    });
-    const dropDispose = await listen<string[]>(TauriEvent.DRAG_DROP, (event) => {
-      const payload = (event as unknown as { payload?: { paths: string[] } }).payload;
-      if (import.meta.env.DEV) {
-        console.debug("[drag-drop] drag drop", payload);
-      }
-      const path = payload?.paths?.[0];
-      if (!path) {
-        publishToast(createToast("warning", "Dropped file path unavailable"));
-        return;
-      }
-      void handleDroppedFile(path);
-    });
-
-    unlistenFileDrop.push(highlightDispose, overDispose, leaveDispose, dropDispose);
+    await getFileDropManager().setup();
   } catch (error) {
-    console.warn("Failed to set up file drop listeners", error);
+    if (import.meta.env.DEV) {
+      console.warn("[drag-drop] listener setup failed", error);
+    }
   }
 };
 
@@ -813,7 +861,7 @@ const restoreLastFile = async () => {
   if (result.status === "error") {
     forgetLastFile();
     resetViewerState();
-    void stopFileWatch();
+    void stopFileWatch().catch(reportWatchStopFailure);
     publishToast(
       createToast("warning", "Last NTR file unavailable", result.message || undefined),
     );
@@ -926,7 +974,7 @@ const createEmptyState = (text: string): HTMLElement => {
 
 const fitToCurrentBounds = () => {
   const bounds = state.graph?.bounds ?? null;
-  renderer?.fitToBounds(bounds);
+  viewerHost?.fitToBounds(bounds);
 };
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -939,15 +987,8 @@ window.addEventListener("DOMContentLoaded", () => {
 });
 
 window.addEventListener("beforeunload", () => {
-  unlistenFileChange?.();
-  unlistenWatchError?.();
-  unlistenFileDrop.forEach((dispose) => {
-    try {
-      dispose();
-    } catch (error) {
-      console.warn("Failed disposing file drop listener", error);
-    }
-  });
-  unlistenFileDrop = [];
-  void stopFileWatch();
+  fileWatchManager?.dispose();
+  fileDropManager?.dispose();
+  viewerHost?.dispose();
+  void stopFileWatch().catch(reportWatchStopFailure);
 });

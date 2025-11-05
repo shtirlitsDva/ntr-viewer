@@ -45,7 +45,7 @@ export const TYPE_COLOR_MAP: Record<SceneElement["kind"], Color3> = {
 export const HIGHLIGHT_COLOR = new Color3(1, 1, 0.4);
 const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
-const MSAA_SAMPLES = 4;
+const DEFAULT_MSAA_SAMPLES = 4;
 const MIN_CAMERA_RADIUS = 0.025;
 const WHEEL_ZOOM_RATE = 0.002;
 interface MeshMetadata {
@@ -58,7 +58,10 @@ interface TubeOptions {
   readonly endDiameter?: number;
 }
 
-export type BabylonRendererOptions = Record<string, never>;
+export interface BabylonRendererOptions {
+  readonly showGrid?: boolean;
+  readonly msaaSamples?: number;
+}
 
 export class BabylonSceneRenderer implements SceneRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -81,11 +84,11 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private currentGraph: SceneGraph | null = null;
   private selectedElement: string | null = null;
   private colorMode: ColorMode = "type";
-  private gridVisible = true;
+  private gridVisible: boolean;
   private sceneOffset = new BabylonVector3(0, 0, 0);
 
-  public constructor(canvas: HTMLCanvasElement, _options: BabylonRendererOptions = {}) {
-    void _options;
+  public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
+    const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
     this.canvas = canvas;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false }, true);
     this.scene = new Scene(this.engine);
@@ -113,7 +116,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.pointerInput = new RevitStylePointerInput();
     this.camera.inputs.add(this.pointerInput);
 
-    this.configureRenderingPipeline();
+    this.gridVisible = showGrid;
+    this.configureRenderingPipeline(msaaSamples);
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
     light.intensity = 0.9;
@@ -132,6 +136,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     groundMaterial.wireframe = true;
     this.ground.material = groundMaterial;
     this.ground.isPickable = false;
+    this.setGridVisible(this.gridVisible);
 
     this.scene.onPointerObservable.add((pointerInfo) => {
       if (pointerInfo.type !== PointerEventTypes.POINTERDOWN) {
@@ -855,10 +860,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
     return color.clone();
   }
 
-  private configureRenderingPipeline(): void {
+  private configureRenderingPipeline(msaaSamples: number): void {
     const pipeline = new DefaultRenderingPipeline("default-pipeline", true, this.scene, [this.camera]);
+    const desiredSamples =
+      Number.isFinite(msaaSamples) && msaaSamples > 0 ? Math.floor(msaaSamples) : DEFAULT_MSAA_SAMPLES;
     const maxSamples = this.engine.getCaps().maxMSAASamples;
-    pipeline.samples = maxSamples > 1 ? Math.min(MSAA_SAMPLES, maxSamples) : 1;
+    pipeline.samples = maxSamples > 1 ? Math.min(desiredSamples, maxSamples) : 1;
     pipeline.fxaaEnabled = true;
     pipeline.imageProcessingEnabled = true;
     this.renderPipeline = pipeline;
