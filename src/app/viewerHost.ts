@@ -5,7 +5,7 @@ import type {
   SceneRenderer,
   SelectionListener,
 } from "@viewer/engine";
-import type { SceneElement } from "@viewer/sceneGraph";
+import type { SceneElement, SceneGraph } from "@viewer/sceneGraph";
 
 type RendererSceneGraph = Parameters<SceneRenderer["load"]>[0];
 type RendererBounds = Parameters<SceneRenderer["fitToBounds"]>[0];
@@ -46,7 +46,10 @@ export const createViewerHost = (config: ViewerHostConfig): ViewerHost => {
     rendererOptions,
   } = config;
 
-  const renderer: SceneRenderer = createBabylonRenderer(canvas, rendererOptions);
+  const renderer: SceneRenderer =
+    rendererOptions !== undefined
+      ? createBabylonRenderer(canvas, rendererOptions)
+      : createBabylonRenderer(canvas);
   const detachInitialListener = renderer.onSelectionChanged(onSelectionChanged);
   renderer.setGridVisible(initialGridVisible);
 

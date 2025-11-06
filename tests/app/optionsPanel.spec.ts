@@ -6,6 +6,8 @@ import {
   readViewerSettings,
   type OptionsPanelController,
 } from "@app/optionsPanel";
+import type { ViewerHost } from "@app/viewerHost";
+import type { SceneRenderer } from "@viewer/engine";
 
 const STORAGE_KEY = "test:viewer-settings";
 
@@ -17,6 +19,48 @@ const createElement = <T extends HTMLElement>(tag: string, attrs: Record<string,
   return el;
 };
 
+const createViewerHostStub = (): ViewerHost => {
+  let rotationValue = 1;
+  let panValue = 1;
+
+  const setRotationSensitivity = vi.fn((value: number) => {
+    rotationValue = value;
+  });
+  const setPanSensitivity = vi.fn((value: number) => {
+    panValue = value;
+  });
+
+  const renderer: SceneRenderer = {
+    load: vi.fn(),
+    setColorMode: vi.fn(),
+    setSelection: vi.fn(),
+    onSelectionChanged: vi.fn(() => vi.fn()),
+    setGridVisible: vi.fn(),
+    fitToBounds: vi.fn(),
+    getRotationSensitivity: () => rotationValue,
+    setRotationSensitivity,
+    getPanSensitivity: () => panValue,
+    setPanSensitivity,
+    dispose: vi.fn(),
+  };
+
+  return {
+    resetScene: vi.fn(),
+    load: vi.fn(),
+    setColorMode: vi.fn(),
+    setSelection: vi.fn(),
+    setGridVisible: vi.fn(),
+    fitToBounds: vi.fn(),
+    getRotationSensitivity: () => rotationValue,
+    setRotationSensitivity,
+    getPanSensitivity: () => panValue,
+    setPanSensitivity,
+    addSelectionListener: vi.fn(() => vi.fn()),
+    dispose: vi.fn(),
+    renderer,
+  };
+};
+
 describe("createOptionsPanelController", () => {
   let panel: HTMLElement;
   let closeButton: HTMLButtonElement;
@@ -25,12 +69,7 @@ describe("createOptionsPanelController", () => {
   let manualPathForm: HTMLFormElement;
   let manualPathInput: HTMLInputElement;
   let controller: OptionsPanelController;
-  let viewerHost: {
-    getRotationSensitivity: () => number;
-    getPanSensitivity: () => number;
-    setRotationSensitivity: (value: number) => void;
-    setPanSensitivity: (value: number) => void;
-  } | null;
+  let viewerHost: ViewerHost | null;
 
   const getViewerHost = () => viewerHost;
 
@@ -49,18 +88,7 @@ describe("createOptionsPanelController", () => {
     panel.append(closeButton, rotationInput, panInput, manualPathForm);
     document.body.append(panel);
 
-    let rotationValue = 1;
-    let panValue = 1;
-    viewerHost = {
-      getRotationSensitivity: () => rotationValue,
-      getPanSensitivity: () => panValue,
-      setRotationSensitivity: vi.fn((value: number) => {
-        rotationValue = value;
-      }),
-      setPanSensitivity: vi.fn((value: number) => {
-        panValue = value;
-      }),
-    };
+    viewerHost = createViewerHostStub();
 
     controller = createOptionsPanelController({
       panel,
