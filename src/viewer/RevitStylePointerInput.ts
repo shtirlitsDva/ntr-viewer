@@ -14,6 +14,7 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
   private readonly basePanningSensibility = 0.25;
   private rotationSensitivity = 1;
   private panSensitivity = 1;
+  private sceneScaleMultiplier = 1;
 
   public constructor() {
     super();
@@ -75,15 +76,27 @@ export class RevitStylePointerInput extends ArcRotateCameraPointersInput {
     this.applyPanSensitivity();
   }
 
+  public setSceneScaleMultiplier(multiplier: number): void {
+    const next = Math.max(RevitStylePointerInput.MIN_SENSITIVITY, multiplier);
+    if (Math.abs(next - this.sceneScaleMultiplier) < 1e-6) {
+      return;
+    }
+    this.sceneScaleMultiplier = next;
+    this.applyRotationSensitivity();
+    this.applyPanSensitivity();
+  }
+
   private applyRotationSensitivity(): void {
     const scale = Math.max(RevitStylePointerInput.MIN_SENSITIVITY, this.rotationSensitivity);
-    const sens = this.baseAngularSensibility / scale;
+    const effective = scale * this.sceneScaleMultiplier;
+    const sens = this.baseAngularSensibility / effective;
     this.angularSensibilityX = sens;
     this.angularSensibilityY = sens;
   }
 
   private applyPanSensitivity(): void {
     const scale = Math.max(RevitStylePointerInput.MIN_SENSITIVITY, this.panSensitivity);
-    this.panningSensibility = this.basePanningSensibility / scale;
+    const effective = scale * this.sceneScaleMultiplier;
+    this.panningSensibility = this.basePanningSensibility / effective;
   }
 }

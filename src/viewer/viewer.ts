@@ -8,6 +8,7 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
+import type { Observer } from "@babylonjs/core/Misc/observable";
 import "@babylonjs/core/Culling/ray";
 import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
@@ -48,6 +49,12 @@ export const DEFAULT_PIPE_DIAMETER = 50;
 const DEFAULT_MSAA_SAMPLES = 4;
 const MIN_CAMERA_RADIUS = 0.025;
 const WHEEL_ZOOM_RATE = 0.002;
+const MIN_INTERACTION_SCALE = 0.25;
+const MAX_INTERACTION_SCALE = 8;
+const INTERACTION_RADIUS_REFERENCE = 25;
+const MAX_CAMERA_FAR = 5_000_000;
+const MIN_NEAR_PLANE = 0.05;
+const RADIUS_EPSILON = 1e-4;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -86,6 +93,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private colorMode: ColorMode = "type";
   private gridVisible: boolean;
   private sceneOffset = new BabylonVector3(0, 0, 0);
+  private sceneScale = 1;
+  private interactionScale = 1;
+  private lastCameraRadius = DEFAULT_CAMERA_RADIUS;
+  private viewMatrixObserver: Observer<PivotOrbitCamera> | null = null;
 
   public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
@@ -115,6 +126,18 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
     this.pointerInput = new RevitStylePointerInput();
     this.camera.inputs.add(this.pointerInput);
+    this.interactionScale = this.computeInteractionScaleForRadius(this.camera.radius);
+    this.pointerInput.setSceneScaleMultiplier(this.interactionScale);
+    this.lastCameraRadius = this.camera.radius;
+    this.viewMatrixObserver = this.camera.onViewMatrixChangedObservable.add(() => {
+      const radius = this.camera.radius;
+      if (Math.abs(radius - this.lastCameraRadius) < RADIUS_EPSILON) {
+        return;
+      }
+      this.lastCameraRadius = radius;
+      this.applyDynamicClipping();
+      this.updateInteractionScaling(radius);
+    });
 
     this.gridVisible = showGrid;
     this.configureRenderingPipeline(msaaSamples);
@@ -189,6 +212,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.canvas.removeEventListener("wheel", this.wheelHandler);
       this.wheelHandler = null;
     }
+    if (this.viewMatrixObserver) {
+      this.camera.onViewMatrixChangedObservable.remove(this.viewMatrixObserver);
+      this.viewMatrixObserver = null;
+    }
     this.renderPipeline?.dispose();
     this.renderPipeline = null;
     this.scene.dispose();
@@ -200,6 +227,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.currentGraph = graph;
     this.sceneOffset = this.computeSceneOffset(graph.bounds);
     this.propertyColorCache.clear();
+    this.updateSceneScale(graph.bounds);
 
     graph.elements.forEach((element) => {
       const meshes = this.createMeshesForElement(element);
@@ -214,10 +242,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.updateColors();
     this.applySelectionColors();
     this.updateGround(graph.bounds);
-    this.updateCameraClipping(graph.bounds);
     if (!options.maintainCamera) {
       this.fitToBounds(graph.bounds);
+      return;
     }
+    this.applyDynamicClipping();
+    this.updateInteractionScaling();
   }
 
   public setColorMode(mode: ColorMode): void {
@@ -268,11 +298,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   public fitToBounds(bounds: SceneGraph["bounds"]): void {
+    this.updateSceneScale(bounds);
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
-      this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
-      this.updateCameraClipping(bounds);
+      this.lastCameraRadius = this.camera.radius;
+      this.applyDynamicClipping();
+      this.updateInteractionScaling();
       return;
     }
 
@@ -280,8 +312,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (!adjusted) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
-      this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
-      this.updateCameraClipping(bounds);
+      this.lastCameraRadius = this.camera.radius;
+      this.applyDynamicClipping();
+      this.updateInteractionScaling();
       return;
     }
 
@@ -296,13 +329,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const spanZ = adjusted.max.z - adjusted.min.z;
     const maxSpan = Math.max(spanX, spanY, spanZ, 1);
     const radius = maxSpan * 1.5;
-    const farPlane = Math.max(maxSpan * 4, radius * 2);
 
     this.camera.target = center;
     this.camera.radius = radius;
-    this.camera.lowerRadiusLimit = Math.max(radius * 0.01, MIN_CAMERA_RADIUS);
-    this.camera.maxZ = farPlane;
-    this.camera.minZ = Math.max(radius * 0.01, 0.05);
+    this.lastCameraRadius = this.camera.radius;
+    this.applyDynamicClipping();
+    this.updateInteractionScaling();
   }
 
   private notifySelectionChanged(): void {
@@ -800,12 +832,15 @@ export class BabylonSceneRenderer implements SceneRenderer {
       }
 
       event.preventDefault();
-      const zoomFactor = Math.exp(event.deltaY * WHEEL_ZOOM_RATE);
+      const zoomFactor = Math.exp(event.deltaY * WHEEL_ZOOM_RATE * this.interactionScale);
       const lowerLimit = this.camera.lowerRadiusLimit ?? 0.1;
       const upperLimit = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
       const targetRadius = this.camera.radius * zoomFactor;
       const clampedRadius = Math.min(Math.max(targetRadius, lowerLimit), upperLimit);
       this.camera.radius = clampedRadius;
+      this.lastCameraRadius = this.camera.radius;
+      this.applyDynamicClipping();
+      this.updateInteractionScaling(this.camera.radius);
     };
 
     this.canvas.addEventListener("wheel", handler, { passive: false });
@@ -882,6 +917,34 @@ export class BabylonSceneRenderer implements SceneRenderer {
     );
   }
 
+  private updateSceneScale(bounds: SceneGraph["bounds"]): void {
+    this.sceneScale = this.computeSceneScale(bounds);
+  }
+
+  private computeSceneScale(bounds: SceneGraph["bounds"]): number {
+    if (!bounds) {
+      return 1;
+    }
+    const spanX = Math.abs(bounds.max.x - bounds.min.x);
+    const spanY = Math.abs(bounds.max.y - bounds.min.y);
+    const spanZ = Math.abs(bounds.max.z - bounds.min.z);
+    return Math.max(spanX, spanY, spanZ, 1);
+  }
+
+  private updateInteractionScaling(radius = this.camera.radius): void {
+    const next = this.computeInteractionScaleForRadius(Math.max(radius, MIN_CAMERA_RADIUS));
+    if (Math.abs(next - this.interactionScale) < 1e-4) {
+      return;
+    }
+    this.interactionScale = next;
+    this.pointerInput.setSceneScaleMultiplier(next);
+  }
+
+  private computeInteractionScaleForRadius(radius: number): number {
+    const normalized = Math.sqrt(radius / INTERACTION_RADIUS_REFERENCE);
+    return clamp(normalized, MIN_INTERACTION_SCALE, MAX_INTERACTION_SCALE);
+  }
+
   private adjustBounds(bounds: SceneGraph["bounds"]): SceneGraph["bounds"] | null {
     if (!bounds) {
       return null;
@@ -900,26 +963,16 @@ export class BabylonSceneRenderer implements SceneRenderer {
     };
   }
 
-  private updateCameraClipping(bounds: SceneGraph["bounds"]): void {
-    if (!bounds) {
-      this.camera.minZ = 0.1;
-      this.camera.maxZ = 10_000;
-      return;
-    }
-
-    const adjusted = this.adjustBounds(bounds);
-    if (!adjusted) {
-      this.camera.minZ = 0.1;
-      this.camera.maxZ = 10_000;
-      return;
-    }
-
-    const spanX = Math.max(adjusted.max.x - adjusted.min.x, 0.0001);
-    const spanY = Math.max(adjusted.max.y - adjusted.min.y, 0.0001);
-    const spanZ = Math.max(adjusted.max.z - adjusted.min.z, 0.0001);
-    const maxSpan = Math.max(spanX, spanY, spanZ);
-    const near = Math.max(maxSpan * 0.005, 0.05);
-    const far = Math.max(maxSpan * 10, near * 50);
+  private applyDynamicClipping(): void {
+    const radius = Math.max(this.camera.radius, MIN_CAMERA_RADIUS);
+    const span = Math.max(this.sceneScale, 1);
+    const maxNear = Math.max(span * 0.05, MIN_NEAR_PLANE * 2);
+    const near = clamp(radius * 0.02, MIN_NEAR_PLANE, maxNear);
+    const far = clamp(
+      Math.max(span * 2, radius * 200, near * 200),
+      near * 10,
+      MAX_CAMERA_FAR,
+    );
     this.camera.minZ = near;
     this.camera.maxZ = far;
   }
@@ -956,6 +1009,16 @@ const colorFromHue = (hue: number): Color3 => {
   const h = (hue % 360) / 360;
   const [r, g, b] = hslToRgb(h, 0.6, 0.5);
   return new Color3(r, g, b);
+};
+
+const clamp = (value: number, min: number, max: number): number => {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
 };
 
 const hslToRgb = (h: number, s: number, l: number): [number, number, number] => {
