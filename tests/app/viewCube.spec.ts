@@ -1,15 +1,25 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { attachViewCube } from "@app/viewCube";
 import type { ViewOrientation } from "@viewer/engine";
 
 describe("viewCube", () => {
+  beforeEach(() => {
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 0);
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("invokes orientView for each face", () => {
     const container = document.createElement("div");
     const orientView = vi.fn();
+    const getCameraAngles = vi.fn(() => ({ alpha: 0, beta: Math.PI / 2 }));
     const controller = attachViewCube({
       container,
-      getOrientationTarget: () => ({ orientView }),
+      getOrientationTarget: () => ({ orientView, getCameraAngles }),
     });
 
     const buttons = container.querySelectorAll<HTMLButtonElement>("[data-orientation]");
@@ -31,7 +41,8 @@ describe("viewCube", () => {
   it("resolves the viewer host lazily", () => {
     const container = document.createElement("div");
     const orientView = vi.fn();
-    let host: { orientView: typeof orientView } | null = null;
+    const getCameraAngles = () => ({ alpha: 0, beta: Math.PI / 2 });
+    let host: { orientView: typeof orientView; getCameraAngles: typeof getCameraAngles } | null = null;
     const controller = attachViewCube({
       container,
       getOrientationTarget: () => host,
@@ -42,7 +53,7 @@ describe("viewCube", () => {
     firstButton?.click();
     expect(orientView).not.toHaveBeenCalled();
 
-    host = { orientView };
+    host = { orientView, getCameraAngles };
     firstButton?.click();
     expect(orientView).toHaveBeenCalledTimes(1);
 

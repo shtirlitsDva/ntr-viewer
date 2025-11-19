@@ -1,5 +1,6 @@
 import { createBabylonRenderer, type BabylonRendererOptions } from "@viewer/viewer";
 import type {
+  CameraAngles,
   ColorMode,
   LoadOptions,
   SceneRenderer,
@@ -34,6 +35,7 @@ export interface ViewerHost {
   setRotationSensitivity(value: number): void;
   getPanSensitivity(): number;
   setPanSensitivity(value: number): void;
+  getCameraAngles(): CameraAngles;
   orientView(orientation: ViewOrientation): void;
   setIsometricView(enabled: boolean): void;
   isIsometricView(): boolean;
@@ -89,6 +91,7 @@ export const createViewerHost = (config: ViewerHostConfig): ViewerHost => {
     setPanSensitivity: (value: number) => {
       renderer.setPanSensitivity(value);
     },
+    getCameraAngles: () => renderer.getCameraAngles(),
     orientView: (orientation: ViewOrientation) => {
       renderer.orientView(orientation);
     },

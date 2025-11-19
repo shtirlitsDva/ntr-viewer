@@ -273,6 +273,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
   public setPanSensitivity(value: number): void {
     this.pointerInput.setPanSensitivity(value);
   }
+
+  public getCameraAngles() {
+    return {
+      alpha: this.camera.alpha,
+      beta: this.camera.beta,
+    } as const;
+  }
   public setIsometricView(enabled: boolean): void {
     if (this.isometricViewEnabled === enabled) {
       return;

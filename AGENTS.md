@@ -57,7 +57,7 @@ tests/             Vitest suites (parser, viewer, app controllers)
 | `telemetryPreferences.ts` | Initialises telemetry toggle state via `@app/telemetry.initializeTelemetry()`. |
 | `api/files.ts` | Thin wrappers around Tauri `invoke` calls (`open_ntr_file`, `load_ntr_file`, `start_file_watch`, `stop_file_watch`). Errors are returned to callers for UI handling. |
 | `telemetry.ts` | Stores telemetry preference in `localStorage`, logs events to console when enabled (placeholder). |
-| `viewCube.ts` | Renders the floating “view cube” gizmo that orients the camera to the requested cardinal direction (up/down/north/south/east/west). |
+| `viewCube.ts` | Renders the floating 3D “view cube” gizmo that mirrors the active camera orientation and orients the scene when its faces are clicked. |
 
 All controllers have dedicated Vitest coverage under `tests/app/` (`fileWatch.spec.ts`, `fileDrop.spec.ts`, `optionsPanel.spec.ts`), ensuring the refactored bootstrap remains regression-tested.
 
