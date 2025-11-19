@@ -33,6 +33,7 @@ import {
 import { createToastManager, type ToastManager } from "./toastManager.ts";
 import { initializeTelemetryToggle } from "./telemetryPreferences.ts";
 import { createViewerHost, type ViewerHost } from "./viewerHost.ts";
+import { attachViewCube, type ViewCubeController } from "./viewCube.ts";
 import type { ColorMode } from "@viewer/engine";
 import { toPropertyColorMode, tryGetPropertyFromColorMode } from "@viewer/engine";
 import { isOk } from "@shared/result";
@@ -60,6 +61,7 @@ let selectionContainer: HTMLElement;
 let issuesList: HTMLUListElement;
 let filePathLabel: HTMLElement;
 let gridToggle: HTMLInputElement;
+let isoToggle: HTMLInputElement;
 let telemetryToggle: HTMLInputElement;
 let toastContainer: HTMLElement;
 let colorModeSelect: HTMLSelectElement;
@@ -70,6 +72,7 @@ let rotationSensitivityInput: HTMLInputElement;
 let panSensitivityInput: HTMLInputElement;
 let manualPathForm: HTMLFormElement;
 let manualPathInput: HTMLInputElement;
+let viewerContainer: HTMLElement;
 let currentColorMode: ColorMode = "type";
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
 const SETTINGS_STORAGE_KEY = "ntr-viewer:options";
@@ -82,6 +85,7 @@ let toolbarController: ToolbarController | null = null;
 let keyboardController: KeyboardShortcutController | null = null;
 let optionsPanelController: OptionsPanelController | null = null;
 let toastManager: ToastManager | null = null;
+let viewCubeController: ViewCubeController | null = null;
 
 const isWindows = navigator.userAgent.toLowerCase().includes("windows");
 
@@ -242,6 +246,7 @@ const initialize = async () => {
   issuesList = queryElement<HTMLUListElement>('[data-panel="issues"]');
   filePathLabel = queryElement<HTMLElement>('[data-state="file-path"]');
   gridToggle = queryElement<HTMLInputElement>('[data-control="grid-toggle"]');
+  isoToggle = queryElement<HTMLInputElement>('[data-control="iso-toggle"]');
   telemetryToggle = queryElement<HTMLInputElement>('[data-control="telemetry-toggle"]');
   toastContainer = queryElement<HTMLElement>('[data-state="toasts"]');
   colorModeSelect = queryElement<HTMLSelectElement>('[data-control="color-mode"]');
@@ -252,6 +257,7 @@ const initialize = async () => {
   panSensitivityInput = queryElement<HTMLInputElement>('[data-control="pan-sensitivity"]');
   manualPathForm = queryElement<HTMLFormElement>('[data-action="manual-path-form"]');
   manualPathInput = queryElement<HTMLInputElement>('[data-control="manual-path"]');
+  viewerContainer = queryElement<HTMLElement>(".viewer-container");
   const openFileButton = queryElement<HTMLButtonElement>('[data-action="open-file"]');
   const fitViewButton = queryElement<HTMLButtonElement>('[data-action="fit-view"]');
   const resetViewButton = queryElement<HTMLButtonElement>('[data-action="reset-view"]');
@@ -268,7 +274,13 @@ const initialize = async () => {
   const persistedSettings = readViewerSettings(SETTINGS_STORAGE_KEY, DEFAULT_SETTINGS);
   viewerHost.setRotationSensitivity(persistedSettings.rotationSensitivity);
   viewerHost.setPanSensitivity(persistedSettings.panSensitivity);
+  viewerHost.setIsometricView(isoToggle.checked);
   updateColorModeOptions([]);
+  viewCubeController?.dispose();
+  viewCubeController = attachViewCube({
+    container: viewerContainer,
+    getOrientationTarget: () => viewerHost,
+  });
 
   toolbarController?.dispose();
   toolbarController = attachToolbar(
@@ -279,6 +291,7 @@ const initialize = async () => {
       optionsToggleButton: optionsOpenButton,
       colorModeSelect,
       gridToggle,
+      isoToggle,
       telemetryToggle,
     },
     {
@@ -297,6 +310,9 @@ const initialize = async () => {
       },
       onGridToggle: (visible) => {
         viewerHost?.setGridVisible(visible);
+      },
+      onIsoToggle: (enabled) => {
+        viewerHost?.setIsometricView(enabled);
       },
       onTelemetryToggle: (enabled) => {
         setTelemetryEnabled(enabled);

@@ -41,6 +41,9 @@ const createViewerHostStub = (): ViewerHost => {
     setRotationSensitivity,
     getPanSensitivity: () => panValue,
     setPanSensitivity,
+    setIsometricView: vi.fn(),
+    isIsometricView: vi.fn(() => false),
+    orientView: vi.fn(),
     dispose: vi.fn(),
   };
 
@@ -55,6 +58,9 @@ const createViewerHostStub = (): ViewerHost => {
     setRotationSensitivity,
     getPanSensitivity: () => panValue,
     setPanSensitivity,
+    setIsometricView: vi.fn(),
+    isIsometricView: () => false,
+    orientView: vi.fn(),
     addSelectionListener: vi.fn(() => vi.fn()),
     dispose: vi.fn(),
     renderer,
