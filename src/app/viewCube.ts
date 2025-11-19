@@ -39,20 +39,24 @@ const FACE_TRANSFORMS: Record<ViewOrientation, string> = {
 
 const toDegrees = (radians: number): number => radians * (180 / Math.PI);
 
-const normalizeAngle = (radians: number): number => {
-  const twoPi = Math.PI * 2;
-  let value = radians % twoPi;
-  if (value < 0) {
-    value += twoPi;
-  }
-  return value;
-};
-
-const buildCubeTransform = (angles: CameraAngles): string => {
-  const normalizedAlpha = normalizeAngle(angles.alpha);
-  const rotY = toDegrees(normalizedAlpha - Math.PI / 2);
+const computeRotation = (
+  angles: CameraAngles,
+  previous: { rotX: number; rotY: number } | null,
+): { rotX: number; rotY: number } => {
   const rotX = toDegrees(angles.beta - Math.PI / 2);
-  return `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+  let rotY = toDegrees(angles.alpha - Math.PI / 2);
+  if (previous) {
+    let delta = rotY - previous.rotY;
+    while (delta > 180) {
+      rotY -= 360;
+      delta = rotY - previous.rotY;
+    }
+    while (delta < -180) {
+      rotY += 360;
+      delta = rotY - previous.rotY;
+    }
+  }
+  return { rotX, rotY };
 };
 
 export const attachViewCube = (config: ViewCubeConfig): ViewCubeController => {
@@ -100,6 +104,7 @@ export const attachViewCube = (config: ViewCubeConfig): ViewCubeController => {
   let rafId: number | null = null;
   let disposed = false;
   let lastTransform = "";
+  let lastRotation: { rotX: number; rotY: number } | null = null;
 
   const updateCubeRotation = () => {
     if (disposed) {
@@ -109,11 +114,13 @@ export const attachViewCube = (config: ViewCubeConfig): ViewCubeController => {
     if (target) {
       const angles = target.getCameraAngles();
       if (angles) {
-        const transform = buildCubeTransform(angles);
+        const rotation = computeRotation(angles, lastRotation);
+        const transform = `rotateX(${rotation.rotX}deg) rotateY(${rotation.rotY}deg)`;
         if (transform !== lastTransform) {
           cube.style.transform = transform;
           lastTransform = transform;
         }
+        lastRotation = rotation;
       }
     }
     rafId = window.requestAnimationFrame(updateCubeRotation);
