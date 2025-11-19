@@ -110,8 +110,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
-    this.camera.lowerBetaLimit = 0.01;
-    this.camera.upperBetaLimit = Math.PI - 0.01;
+    this.camera.lowerBetaLimit = 0;
+    this.camera.upperBetaLimit = Math.PI;
     this.camera.allowUpsideDown = false;
     this.camera.wheelDeltaPercentage = 0.01;
     this.camera.panningSensibility = 50;

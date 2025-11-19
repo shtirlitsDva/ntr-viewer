@@ -131,16 +131,9 @@ body {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  width: 80px;
-  height: 80px;
-  padding: 0.35rem;
-  background: rgba(9, 13, 20, 0.85);
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  width: 70px;
+  height: 70px;
   pointer-events: none;
-  backdrop-filter: blur(6px);
-  opacity: 0.85;
 }
 
 .view-gizmo-inner {
