@@ -9,6 +9,7 @@ import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { DefaultRenderingPipeline } from "@babylonjs/core/PostProcesses/RenderPipeline/Pipelines/defaultRenderingPipeline";
 import type { Observer } from "@babylonjs/core/Misc/observable";
+import type { Camera } from "@babylonjs/core/Cameras/camera";
 import "@babylonjs/core/Culling/ray";
 import "@babylonjs/core/Meshes/Builders/linesBuilder";
 import "@babylonjs/core/Meshes/Builders/groundBuilder";
@@ -55,6 +56,7 @@ const INTERACTION_RADIUS_REFERENCE = 25;
 const MAX_CAMERA_FAR = 5_000_000;
 const MIN_NEAR_PLANE = 0.05;
 const RADIUS_EPSILON = 1e-4;
+const NORMALIZED_SCENE_SPAN = 10_000;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -93,10 +95,11 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private colorMode: ColorMode = "type";
   private gridVisible: boolean;
   private sceneOffset = new BabylonVector3(0, 0, 0);
+  private sceneLengthScale = 1;
   private sceneScale = 1;
   private interactionScale = 1;
   private lastCameraRadius = DEFAULT_CAMERA_RADIUS;
-  private viewMatrixObserver: Observer<PivotOrbitCamera> | null = null;
+  private viewMatrixObserver: Observer<Camera> | null = null;
 
   public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
@@ -552,29 +555,17 @@ export class BabylonSceneRenderer implements SceneRenderer {
     end: ResolvedPoint,
     options: TubeOptions,
   ): Mesh | null {
-    if (start.kind !== "coordinate" || end.kind !== "coordinate") {
+    const startVec = this.toSceneVector(start);
+    const endVec = this.toSceneVector(end);
+    if (!startVec || !endVec) {
       return null;
     }
 
-    const startVec = new BabylonVector3(
-      start.scenePosition.x,
-      start.scenePosition.y,
-      start.scenePosition.z,
-    );
-    const endVec = new BabylonVector3(
-      end.scenePosition.x,
-      end.scenePosition.y,
-      end.scenePosition.z,
-    );
-
-    startVec.subtractInPlace(this.sceneOffset);
-    endVec.subtractInPlace(this.sceneOffset);
-
     const path = [startVec, endVec];
-    const startDiameter = Math.max(options.startDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-    const endDiameter = Math.max(options.endDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-    const startRadius = startDiameter * 0.5;
-    const endRadius = endDiameter * 0.5;
+    const startDiameterRaw = options.startDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER;
+    const endDiameterRaw = options.endDiameter ?? options.diameter ?? DEFAULT_PIPE_DIAMETER;
+    const startRadius = Math.max(this.scaleLength(startDiameterRaw * 0.5), 0.01);
+    const endRadius = Math.max(this.scaleLength(endDiameterRaw * 0.5), 0.01);
 
     const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
       path,
@@ -609,23 +600,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   // Inputs in scene space
-  const startVec = new BabylonVector3(
-    element.start.scenePosition.x,
-    element.start.scenePosition.y,
-    element.start.scenePosition.z,
-  ).subtract(this.sceneOffset);
-
-  const endVec = new BabylonVector3(
-    element.end.scenePosition.x,
-    element.end.scenePosition.y,
-    element.end.scenePosition.z,
-  ).subtract(this.sceneOffset);
-
-  const tangentVec = new BabylonVector3(
-    element.tangent.scenePosition.x,
-    element.tangent.scenePosition.y,
-    element.tangent.scenePosition.z,
-  ).subtract(this.sceneOffset);
+  const startVec = this.toSceneVector(element.start);
+  const endVec = this.toSceneVector(element.end);
+  const tangentVec = this.toSceneVector(element.tangent);
+  if (!startVec || !endVec || !tangentVec) {
+    return null;
+  }
 
   // Tangent directions at ends (S→I, I→E)
   const startDir = BabylonVector3.Normalize(tangentVec.clone().subtract(startVec));
@@ -633,7 +613,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   if (startDir.lengthSquared() < 1e-6 || endDir.lengthSquared() < 1e-6) return null;
 
   // Choose stub length (mm) and clamp so it never exceeds available straight
-  const STUB_MM = 5;
+  const STUB_MM = this.scaleLength(5);
   const distS = BabylonVector3.Distance(startVec, tangentVec);
   const distE = BabylonVector3.Distance(endVec, tangentVec);
   const stub = Math.max(0, Math.min(STUB_MM, distS * 0.49, distE * 0.49));
@@ -690,7 +670,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
   if (endAngle <= 0) endAngle += Math.PI * 2;
 
   // Sampling
-  const ARC_SEGMENT_LENGTH_TARGET = 20; // keep your project-level constant if you have one
+  const ARC_SEGMENT_LENGTH_TARGET = Math.max(this.scaleLength(20), 1e-3);
   const arcLength = measuredRadius * endAngle;
   const segmentCount = Math.max(12, Math.min(128, Math.ceil(arcLength / ARC_SEGMENT_LENGTH_TARGET)));
 
@@ -714,7 +694,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   path.push(endVec.clone());                   // exact end
 
   // Tube options: leave ends open to butt to straights
-  const pipeDiameter = Math.max(element.outerDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+  const pipeDiameterRaw = element.outerDiameter ?? DEFAULT_PIPE_DIAMETER;
+  const pipeDiameter = Math.max(this.scaleLength(pipeDiameterRaw), 0.01);
   const tubeOptions: Parameters<typeof MeshBuilder.CreateTube>[1] = {
     path,
     cap: Mesh.CAP_ALL,                          // important for clean butt joints
@@ -735,29 +716,18 @@ export class BabylonSceneRenderer implements SceneRenderer {
       return null;
     }
 
-    const mainStart = new BabylonVector3(
-      element.mainStart.scenePosition.x,
-      element.mainStart.scenePosition.y,
-      element.mainStart.scenePosition.z,
-    ).subtract(this.sceneOffset);
-    const mainEnd = new BabylonVector3(
-      element.mainEnd.scenePosition.x,
-      element.mainEnd.scenePosition.y,
-      element.mainEnd.scenePosition.z,
-    ).subtract(this.sceneOffset);
-    const branchStart = new BabylonVector3(
-      element.branchStart.scenePosition.x,
-      element.branchStart.scenePosition.y,
-      element.branchStart.scenePosition.z,
-    ).subtract(this.sceneOffset);
-    const branchEnd = new BabylonVector3(
-      element.branchEnd.scenePosition.x,
-      element.branchEnd.scenePosition.y,
-      element.branchEnd.scenePosition.z,
-    ).subtract(this.sceneOffset);
+    const mainStart = this.toSceneVector(element.mainStart);
+    const mainEnd = this.toSceneVector(element.mainEnd);
+    const branchStart = this.toSceneVector(element.branchStart);
+    const branchEnd = this.toSceneVector(element.branchEnd);
+    if (!mainStart || !mainEnd || !branchStart || !branchEnd) {
+      return null;
+    }
 
-    const mainDiameter = Math.max(element.mainOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
-    const branchDiameter = Math.max(element.branchOuterDiameter ?? DEFAULT_PIPE_DIAMETER, 0.01);
+    const mainDiameterRaw = element.mainOuterDiameter ?? DEFAULT_PIPE_DIAMETER;
+    const branchDiameterRaw = element.branchOuterDiameter ?? DEFAULT_PIPE_DIAMETER;
+    const mainDiameter = Math.max(this.scaleLength(mainDiameterRaw), 0.01);
+    const branchDiameter = Math.max(this.scaleLength(branchDiameterRaw), 0.01);
 
     const mainTube = MeshBuilder.CreateTube(
       `${element.id}-main-temp`,
@@ -918,10 +888,13 @@ export class BabylonSceneRenderer implements SceneRenderer {
   }
 
   private updateSceneScale(bounds: SceneGraph["bounds"]): void {
-    this.sceneScale = this.computeSceneScale(bounds);
+    const span = this.computeSceneSpan(bounds);
+    this.sceneLengthScale = this.computeSceneLengthScale(span);
+    const scaledSpan = span * this.sceneLengthScale;
+    this.sceneScale = scaledSpan > 0 ? scaledSpan : 1;
   }
 
-  private computeSceneScale(bounds: SceneGraph["bounds"]): number {
+  private computeSceneSpan(bounds: SceneGraph["bounds"]): number {
     if (!bounds) {
       return 1;
     }
@@ -929,6 +902,16 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const spanY = Math.abs(bounds.max.y - bounds.min.y);
     const spanZ = Math.abs(bounds.max.z - bounds.min.z);
     return Math.max(spanX, spanY, spanZ, 1);
+  }
+
+  private computeSceneLengthScale(span: number): number {
+    if (!Number.isFinite(span) || span <= 0) {
+      return 1;
+    }
+    if (span <= NORMALIZED_SCENE_SPAN) {
+      return 1;
+    }
+    return NORMALIZED_SCENE_SPAN / span;
   }
 
   private updateInteractionScaling(radius = this.camera.radius): void {
@@ -950,17 +933,39 @@ export class BabylonSceneRenderer implements SceneRenderer {
       return null;
     }
     return {
-      min: {
-        x: bounds.min.x - this.sceneOffset.x,
-        y: bounds.min.y - this.sceneOffset.y,
-        z: bounds.min.z - this.sceneOffset.z,
-      },
-      max: {
-        x: bounds.max.x - this.sceneOffset.x,
-        y: bounds.max.y - this.sceneOffset.y,
-        z: bounds.max.z - this.sceneOffset.z,
-      },
+      min: this.transformBoundsPoint(bounds.min),
+      max: this.transformBoundsPoint(bounds.max),
     };
+  }
+
+  private transformBoundsPoint(
+    point: NonNullable<SceneGraph["bounds"]>["min"],
+  ): NonNullable<SceneGraph["bounds"]>["min"] {
+    return {
+      x: (point.x - this.sceneOffset.x) * this.sceneLengthScale,
+      y: (point.y - this.sceneOffset.y) * this.sceneLengthScale,
+      z: (point.z - this.sceneOffset.z) * this.sceneLengthScale,
+    };
+  }
+
+  private toSceneVector(point: ResolvedPoint): BabylonVector3 | null {
+    if (point.kind !== "coordinate") {
+      return null;
+    }
+    const vector = new BabylonVector3(
+      point.scenePosition.x,
+      point.scenePosition.y,
+      point.scenePosition.z,
+    );
+    vector.subtractInPlace(this.sceneOffset);
+    if (this.sceneLengthScale !== 1) {
+      vector.scaleInPlace(this.sceneLengthScale);
+    }
+    return vector;
+  }
+
+  private scaleLength(value: number): number {
+    return value * this.sceneLengthScale;
   }
 
   private applyDynamicClipping(): void {
