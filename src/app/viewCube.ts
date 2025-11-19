@@ -25,7 +25,7 @@ const FACE_LABELS: Record<ViewOrientation, { readonly label: string; readonly ti
 
 const ORIENTATIONS: readonly ViewOrientation[] = ["north", "south", "east", "west", "up", "down"];
 
-const CUBE_SIZE = 96;
+const CUBE_SIZE = 48;
 const FACE_OFFSET = CUBE_SIZE / 2;
 
 const FACE_TRANSFORMS: Record<ViewOrientation, string> = {

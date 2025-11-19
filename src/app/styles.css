@@ -131,15 +131,16 @@ body {
   position: absolute;
   top: 0.75rem;
   right: 0.75rem;
-  width: 130px;
-  height: 130px;
-  padding: 0.5rem;
+  width: 80px;
+  height: 80px;
+  padding: 0.35rem;
   background: rgba(9, 13, 20, 0.85);
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   backdrop-filter: blur(6px);
+  opacity: 0.85;
 }
 
 .view-gizmo-inner {
@@ -159,11 +160,11 @@ body {
 
 .view-gizmo-face {
   position: absolute;
-  top: calc(50% - 48px);
-  left: calc(50% - 48px);
-  width: 96px;
-  height: 96px;
-  border-radius: 10px;
+  top: calc(50% - 24px);
+  left: calc(50% - 24px);
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.05));
   color: #f5f7fa;
