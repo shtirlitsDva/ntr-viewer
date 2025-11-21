@@ -157,4 +157,48 @@ describe("buildSceneGraph", () => {
     if (sceneValve.kind !== "ARM") expect.fail("expected ARM scene element");
     expect(sceneValve.weight).toBe(10);
   });
+
+  it("scales coordinates when metadata units are meters", () => {
+    const straight: StraightPipe = {
+      kind: "RO",
+      rawFields: {
+        P1: "1,0,0",
+        P2: "2,0,0",
+        DN: "DN150",
+      },
+      start: coordinate(1, 0, 0),
+      end: coordinate(2, 0, 0),
+      nominalDiameter: asNominalDiameterCode("DN150"),
+      loadCases: [],
+      material: undefined,
+      description: undefined,
+      reference: undefined,
+      pipeline: undefined,
+      componentTag: undefined,
+      norm: undefined,
+      series: undefined,
+      schedule: undefined,
+    };
+
+    const file: NtrFile = {
+      id: asIdentifier("meter-test"),
+      metadata: { coordinateUnit: "meter" },
+      definitions: { nominalDiameters: {} },
+      elements: [straight],
+      issues: [],
+    };
+
+    const graph = buildSceneGraph(file);
+    expect(graph.elements).toHaveLength(1);
+    const [sceneStraight] = graph.elements;
+    if (sceneStraight.kind !== "RO") {
+      expect.fail("expected RO element");
+    }
+    if (sceneStraight.start.kind !== "coordinate" || sceneStraight.end.kind !== "coordinate") {
+      expect.fail("expected resolved coordinates");
+    }
+    expect(sceneStraight.end.position.x).toBe(2000);
+    expect(sceneStraight.end.scenePosition.x).toBe(2000);
+    expect(graph.bounds?.max.x).toBe(2000);
+  });
 });

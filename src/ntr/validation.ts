@@ -271,10 +271,13 @@ export const parseIssueSchema = z
   .strict()
   .transform((value) => value as ParseIssue);
 
+const coordinateUnitSchema = z.union([z.literal("millimeter"), z.literal("meter")]);
+
 const metadataSchema = z
   .object({
     projectName: z.string().trim().min(1).optional(),
     specification: z.string().trim().min(1).optional(),
+    coordinateUnit: coordinateUnitSchema.optional(),
   })
   .strict()
   .default({});

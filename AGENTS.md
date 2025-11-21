@@ -48,7 +48,7 @@ tests/             Vitest suites (parser, viewer, app controllers)
 | Module | Responsibility | Key APIs |
 | --- | --- | --- |
 | `viewerHost.ts` | Wraps `createBabylonRenderer`, exposing scene controls (`load`, `setSelection`, `fitToBounds`, sensitivity getters/setters). Ensures renderer cleanup. |
-| `toolbar.ts` | Manages toolbar button & toggle listeners. Returns a disposable controller. |
+| `toolbar.ts` | Manages toolbar button & toggle listeners (open, fit/reset, options, color, grid, iso, telemetry). Returns a disposable controller. |
 | `keyboardShortcuts.ts` | Global keyboard shortcuts for fit (`F`), reset (`R`), clear selection (`Esc`), toggle grid (`G`). |
 | `optionsPanel.ts` | Full options drawer behaviour: sensitivity inputs, manual path submission, storage sync, focus management. Exposes `show/hide/toggle/refresh/dispose`. |
 | `fileWatch.ts` | Listens for `ntr-file-changed` / `ntr-file-watch-error` events from Tauri, surfacing async errors via injected callbacks. |
@@ -57,12 +57,14 @@ tests/             Vitest suites (parser, viewer, app controllers)
 | `telemetryPreferences.ts` | Initialises telemetry toggle state via `@app/telemetry.initializeTelemetry()`. |
 | `api/files.ts` | Thin wrappers around Tauri `invoke` calls (`open_ntr_file`, `load_ntr_file`, `start_file_watch`, `stop_file_watch`). Errors are returned to callers for UI handling. |
 | `telemetry.ts` | Stores telemetry preference in `localStorage`, logs events to console when enabled (placeholder). |
+| `viewCube.ts` | Renders the floating 3D “view cube” gizmo that mirrors the active camera orientation and orients the scene when its faces are clicked. |
 
 All controllers have dedicated Vitest coverage under `tests/app/` (`fileWatch.spec.ts`, `fileDrop.spec.ts`, `optionsPanel.spec.ts`), ensuring the refactored bootstrap remains regression-tested.
 
 ### Viewer (`src/viewer`)
 - `viewer.ts` – Babylon.js renderer implementation (`BabylonSceneRenderer`). Key features:
   - Camera: custom `PivotOrbitCamera` supporting override pivots, clamped zoom sensitivity (wheel rate constant) and close-range orbiting.
+  - Projection: can switch between perspective and orthographic isometric view (toolbar toggle).
   - Scene graph integration: loads meshes, handles selection highlighting, colour modes (`type`, `material`, or property-based).
   - Grid mesh, MSAA pipeline configuration, pointer picking logic, and toast/selection callbacks.
 - `camera/PivotOrbitCamera.ts` – Extends `ArcRotateCamera` to orbit around custom pivots, enforces beta limits, and resets inertial offsets on manual moves.
@@ -109,4 +111,3 @@ All controllers have dedicated Vitest coverage under `tests/app/` (`fileWatch.sp
 - Toasts should use `showToast` (or `publishToast(createToast(...))`) to ensure consistent styling/timeout.
 - When updating file watchers, verify Vitest suites (`tests/app/fileWatch.spec.ts`, `tests/app/fileDrop.spec.ts`) still assert behaviour.
 - Keep `AGENTS.md` in sync with structural changes—this document should be treated as the authoritative architecture reference for automation agents.
-

@@ -2,6 +2,13 @@ import type { SceneGraph } from "./sceneGraph";
 
 export type ColorMode = "type" | "material" | `property:${string}`;
 
+export type ViewOrientation = "north" | "south" | "east" | "west" | "up" | "down";
+
+export interface CameraAngles {
+  readonly alpha: number;
+  readonly beta: number;
+}
+
 export const PROPERTY_COLOR_MODE_PREFIX = "property:";
 
 export const toPropertyColorMode = (property: string): ColorMode =>
@@ -27,6 +34,10 @@ export interface SceneRenderer {
   setRotationSensitivity(value: number): void;
   getPanSensitivity(): number;
   setPanSensitivity(value: number): void;
+  getCameraAngles(): CameraAngles;
+  setIsometricView(enabled: boolean): void;
+  isIsometricView(): boolean;
+  orientView(orientation: ViewOrientation): void;
   dispose(): void;
 }
 

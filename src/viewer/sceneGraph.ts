@@ -11,6 +11,7 @@ import type {
 } from "@ntr/model";
 import type {
   ComponentTag,
+  CoordinateUnit,
   LoadCaseCode,
   MaterialCode,
   NominalDiameterCode,
@@ -132,11 +133,19 @@ export interface SceneGraph {
   readonly bounds: BoundingBox | null;
 }
 
+const getCoordinateScale = (unit: CoordinateUnit | undefined): number => {
+  if (unit === "meter") {
+    return 1000;
+  }
+  return 1;
+};
+
 export const buildSceneGraph = (file: NtrFile): SceneGraph => {
   const builder = createBoundsBuilder();
   const diameterLookup = file.definitions.nominalDiameters;
+  const coordinateScale = getCoordinateScale(file.metadata.coordinateUnit);
   const elements = file.elements.map((element, index) =>
-    convertElement(element, `element-${index}`, builder, diameterLookup),
+    convertElement(element, `element-${index}`, builder, diameterLookup, coordinateScale),
   );
 
   return {
@@ -154,20 +163,21 @@ const convertElement = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneElement => {
   switch (element.kind) {
     case "RO":
-      return convertStraightPipe(element, id, builder, lookup);
+      return convertStraightPipe(element, id, builder, lookup, coordinateScale);
     case "PROF":
-      return convertProfile(element, id, builder);
+      return convertProfile(element, id, builder, coordinateScale);
     case "BOG":
-      return convertBend(element, id, builder, lookup);
+      return convertBend(element, id, builder, lookup, coordinateScale);
     case "TEE":
-      return convertTee(element, id, builder, lookup);
+      return convertTee(element, id, builder, lookup, coordinateScale);
     case "ARM":
-      return convertArm(element, id, builder, lookup);
+      return convertArm(element, id, builder, lookup, coordinateScale);
     case "RED":
-      return convertReducer(element, id, builder, lookup);
+      return convertReducer(element, id, builder, lookup, coordinateScale);
   }
 };
 
@@ -195,9 +205,10 @@ const convertStraightPipe = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneStraightPipe => {
-  const start = resolvePoint(element.start, builder);
-  const end = resolvePoint(element.end, builder);
+  const start = resolvePoint(element.start, builder, coordinateScale);
+  const end = resolvePoint(element.end, builder, coordinateScale);
   return {
     kind: "RO",
     ...baseProps(id, element),
@@ -212,11 +223,12 @@ const convertProfile = (
   element: Profile,
   id: string,
   builder: BoundsBuilder,
+  coordinateScale: number,
 ): SceneProfile => {
-  const start = resolvePoint(element.start, builder);
-  const end = resolvePoint(element.end, builder);
+  const start = resolvePoint(element.start, builder, coordinateScale);
+  const end = resolvePoint(element.end, builder, coordinateScale);
   const axisDirection = element.axisDirection
-    ? resolvePoint(element.axisDirection, builder)
+    ? resolvePoint(element.axisDirection, builder, coordinateScale)
     : undefined;
   return {
     kind: "PROF",
@@ -234,10 +246,11 @@ const convertBend = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneBend => {
-  const start = resolvePoint(element.start, builder);
-  const end = resolvePoint(element.end, builder);
-  const tangent = resolvePoint(element.tangent, builder);
+  const start = resolvePoint(element.start, builder, coordinateScale);
+  const end = resolvePoint(element.end, builder, coordinateScale);
+  const tangent = resolvePoint(element.tangent, builder, coordinateScale);
   return {
     kind: "BOG",
     ...baseProps(id, element),
@@ -254,11 +267,12 @@ const convertTee = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneTee => {
-  const mainStart = resolvePoint(element.mainStart, builder);
-  const mainEnd = resolvePoint(element.mainEnd, builder);
-  const branchStart = resolvePoint(element.branchStart, builder);
-  const branchEnd = resolvePoint(element.branchEnd, builder);
+  const mainStart = resolvePoint(element.mainStart, builder, coordinateScale);
+  const mainEnd = resolvePoint(element.mainEnd, builder, coordinateScale);
+  const branchStart = resolvePoint(element.branchStart, builder, coordinateScale);
+  const branchEnd = resolvePoint(element.branchEnd, builder, coordinateScale);
   return {
     kind: "TEE",
     ...baseProps(id, element),
@@ -279,10 +293,11 @@ const convertArm = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneArm => {
-  const start = resolvePoint(element.start, builder);
-  const end = resolvePoint(element.end, builder);
-  const center = resolvePoint(element.center, builder);
+  const start = resolvePoint(element.start, builder, coordinateScale);
+  const end = resolvePoint(element.end, builder, coordinateScale);
+  const center = resolvePoint(element.center, builder, coordinateScale);
   return {
     kind: "ARM",
     ...baseProps(id, element),
@@ -302,9 +317,10 @@ const convertReducer = (
   id: string,
   builder: BoundsBuilder,
   lookup: Record<NominalDiameterCode, NominalDiameterDefinition>,
+  coordinateScale: number,
 ): SceneReducer => {
-  const start = resolvePoint(element.start, builder);
-  const end = resolvePoint(element.end, builder);
+  const start = resolvePoint(element.start, builder, coordinateScale);
+  const end = resolvePoint(element.end, builder, coordinateScale);
   return {
     kind: "RED",
     ...baseProps(id, element),
@@ -317,11 +333,22 @@ const convertReducer = (
   };
 };
 
-const resolvePoint = (point: PointReference, builder: BoundsBuilder): ResolvedPoint => {
+const scaleVector = (vector: Vector3, scale: number): Vector3 => ({
+  x: vector.x * scale,
+  y: vector.y * scale,
+  z: vector.z * scale,
+});
+
+const resolvePoint = (
+  point: PointReference,
+  builder: BoundsBuilder,
+  coordinateScale: number,
+): ResolvedPoint => {
   if (point.kind === "coordinate") {
-    const scenePosition = transformVector(point.position);
+    const position = scaleVector(point.position, coordinateScale);
+    const scenePosition = transformVector(position);
     builder.add(scenePosition);
-    return { kind: "coordinate", position: point.position, scenePosition };
+    return { kind: "coordinate", position, scenePosition };
   }
   return { kind: "unresolved", reference: point.id };
 };

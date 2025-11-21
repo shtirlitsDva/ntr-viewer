@@ -7,6 +7,7 @@ export interface ToolbarElements {
   readonly optionsToggleButton: HTMLButtonElement;
   readonly colorModeSelect: HTMLSelectElement;
   readonly gridToggle: HTMLInputElement;
+  readonly isoToggle: HTMLInputElement;
   readonly telemetryToggle: HTMLInputElement;
 }
 
@@ -17,6 +18,7 @@ export interface ToolbarCallbacks {
   onOptionsToggle(): void;
   onColorModeChange(mode: ColorMode): void;
   onGridToggle(visible: boolean): void;
+  onIsoToggle(enabled: boolean): void;
   onTelemetryToggle(enabled: boolean): void;
 }
 
@@ -35,6 +37,7 @@ export const attachToolbar = (
     optionsToggleButton,
     colorModeSelect,
     gridToggle,
+    isoToggle,
     telemetryToggle,
   } = elements;
 
@@ -69,6 +72,11 @@ export const attachToolbar = (
   };
   gridToggle.addEventListener("change", handleGridToggle);
 
+  const handleIsoToggle = () => {
+    callbacks.onIsoToggle(isoToggle.checked);
+  };
+  isoToggle.addEventListener("change", handleIsoToggle);
+
   const handleTelemetryToggle = () => {
     callbacks.onTelemetryToggle(telemetryToggle.checked);
   };
@@ -82,8 +90,8 @@ export const attachToolbar = (
       optionsToggleButton.removeEventListener("click", handleOptionsClick);
       colorModeSelect.removeEventListener("change", handleColorModeChange);
       gridToggle.removeEventListener("change", handleGridToggle);
+      isoToggle.removeEventListener("change", handleIsoToggle);
       telemetryToggle.removeEventListener("change", handleTelemetryToggle);
     },
   };
 };
-

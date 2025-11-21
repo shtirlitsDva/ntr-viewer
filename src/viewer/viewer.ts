@@ -1,5 +1,6 @@
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
+import { Camera } from "@babylonjs/core/Cameras/camera";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Color3, Color4 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 as BabylonVector3 } from "@babylonjs/core/Maths/math.vector";
@@ -21,6 +22,7 @@ import type {
   LoadOptions,
   SelectionListener,
   ColorMode,
+  ViewOrientation,
 } from "./engine";
 import { tryGetPropertyFromColorMode } from "./engine";
 import {
@@ -86,6 +88,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private colorMode: ColorMode = "type";
   private gridVisible: boolean;
   private sceneOffset = new BabylonVector3(0, 0, 0);
+  private isometricViewEnabled = false;
+  private lastBoundsSpan = 1;
 
   public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
@@ -106,8 +110,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
     this.camera.minZ = 0.1;
     this.camera.maxZ = 100_000;
-    this.camera.lowerBetaLimit = 0.01;
-    this.camera.upperBetaLimit = Math.PI - 0.01;
+    this.camera.lowerBetaLimit = 0;
+    this.camera.upperBetaLimit = Math.PI;
     this.camera.allowUpsideDown = false;
     this.camera.wheelDeltaPercentage = 0.01;
     this.camera.panningSensibility = 50;
@@ -174,6 +178,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     const resize = () => {
       this.engine.resize();
+      if (this.isometricViewEnabled) {
+        this.updateOrthographicFrustum();
+      }
     };
     window.addEventListener("resize", resize);
     this.resizeHandler = resize;
@@ -267,12 +274,53 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.pointerInput.setPanSensitivity(value);
   }
 
+  public getCameraAngles() {
+    return {
+      alpha: this.camera.alpha,
+      beta: this.camera.beta,
+    } as const;
+  }
+  public setIsometricView(enabled: boolean): void {
+    if (this.isometricViewEnabled === enabled) {
+      return;
+    }
+
+    this.isometricViewEnabled = enabled;
+    if (enabled) {
+      this.camera.mode = Camera.ORTHOGRAPHIC_CAMERA;
+      this.applyIsometricOrientation();
+      this.fitToBounds(this.currentGraph?.bounds ?? null);
+      this.updateOrthographicFrustum();
+    } else {
+      this.camera.mode = Camera.PERSPECTIVE_CAMERA;
+      this.fitToBounds(this.currentGraph?.bounds ?? null);
+    }
+  }
+
+  public isIsometricView(): boolean {
+    return this.isometricViewEnabled;
+  }
+
+  public orientView(orientation: ViewOrientation): void {
+    const desired = getOrientationAngles(orientation, this.camera.alpha);
+    const lowerBeta = this.camera.lowerBetaLimit ?? 0.01;
+    const upperBeta = this.camera.upperBetaLimit ?? Math.PI - 0.01;
+    const clampedBeta = clamp(desired.beta, lowerBeta, upperBeta);
+    this.camera.inertialAlphaOffset = 0;
+    this.camera.inertialBetaOffset = 0;
+    this.camera.inertialRadiusOffset = 0;
+    this.camera.alpha = normalizeAngle(desired.alpha);
+    this.camera.beta = clampedBeta;
+  }
+
   public fitToBounds(bounds: SceneGraph["bounds"]): void {
     if (!bounds) {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
       this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
       this.updateCameraClipping(bounds);
+      this.lastBoundsSpan = 1;
+      this.updateOrthographicFrustum();
       return;
     }
 
@@ -282,6 +330,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
       this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
       this.updateCameraClipping(bounds);
+      this.lastBoundsSpan = 1;
+      this.updateOrthographicFrustum();
       return;
     }
 
@@ -295,6 +345,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const spanY = adjusted.max.y - adjusted.min.y;
     const spanZ = adjusted.max.z - adjusted.min.z;
     const maxSpan = Math.max(spanX, spanY, spanZ, 1);
+    this.lastBoundsSpan = maxSpan;
     const radius = maxSpan * 1.5;
     const farPlane = Math.max(maxSpan * 4, radius * 2);
 
@@ -303,6 +354,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.lowerRadiusLimit = Math.max(radius * 0.01, MIN_CAMERA_RADIUS);
     this.camera.maxZ = farPlane;
     this.camera.minZ = Math.max(radius * 0.01, 0.05);
+    this.updateOrthographicFrustum();
   }
 
   private notifySelectionChanged(): void {
@@ -806,6 +858,9 @@ export class BabylonSceneRenderer implements SceneRenderer {
       const targetRadius = this.camera.radius * zoomFactor;
       const clampedRadius = Math.min(Math.max(targetRadius, lowerLimit), upperLimit);
       this.camera.radius = clampedRadius;
+      if (this.isometricViewEnabled) {
+        this.updateOrthographicFrustum();
+      }
     };
 
     this.canvas.addEventListener("wheel", handler, { passive: false });
@@ -923,6 +978,46 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.minZ = near;
     this.camera.maxZ = far;
   }
+
+  private updateOrthographicFrustum(): void {
+    if (!this.isometricViewEnabled) {
+      return;
+    }
+
+    const base = Math.max(this.lastBoundsSpan, 1);
+    const radius = Math.max(this.camera.radius, base);
+    const aspect = this.engine.getAspectRatio(this.camera);
+
+    if (!Number.isFinite(aspect) || aspect <= 0) {
+      this.camera.orthoLeft = -radius;
+      this.camera.orthoRight = radius;
+      this.camera.orthoTop = radius;
+      this.camera.orthoBottom = -radius;
+      return;
+    }
+
+    if (aspect >= 1) {
+      this.camera.orthoLeft = -radius * aspect;
+      this.camera.orthoRight = radius * aspect;
+      this.camera.orthoTop = radius;
+      this.camera.orthoBottom = -radius;
+      return;
+    }
+
+    this.camera.orthoLeft = -radius;
+    this.camera.orthoRight = radius;
+    const verticalHalf = radius / aspect;
+    this.camera.orthoTop = verticalHalf;
+    this.camera.orthoBottom = -verticalHalf;
+  }
+
+  private applyIsometricOrientation(): void {
+    this.camera.inertialAlphaOffset = 0;
+    this.camera.inertialBetaOffset = 0;
+    this.camera.inertialRadiusOffset = 0;
+    this.camera.alpha = ISO_ALPHA;
+    this.camera.beta = ISO_BETA;
+  }
 }
 
 export function createBabylonRenderer(canvas: HTMLCanvasElement): SceneRenderer;
@@ -950,6 +1045,53 @@ const hashString = (value: string): number => {
     hash |= 0;
   }
   return Math.abs(hash);
+};
+
+interface OrientationAngles {
+  alpha: number;
+  beta: number;
+}
+
+const ISO_ALPHA = -Math.PI / 4;
+const ISO_BETA = Math.acos(Math.sqrt(1 / 3));
+const DEFAULT_HORIZONTAL_BETA = Math.PI / 2;
+
+const getOrientationAngles = (orientation: ViewOrientation, currentAlpha: number): OrientationAngles => {
+  switch (orientation) {
+    case "north":
+      return { alpha: Math.PI / 2, beta: DEFAULT_HORIZONTAL_BETA };
+    case "south":
+      return { alpha: (3 * Math.PI) / 2, beta: DEFAULT_HORIZONTAL_BETA };
+    case "east":
+      return { alpha: 0, beta: DEFAULT_HORIZONTAL_BETA };
+    case "west":
+      return { alpha: Math.PI, beta: DEFAULT_HORIZONTAL_BETA };
+    case "down":
+      return { alpha: currentAlpha, beta: Math.PI };
+    case "up":
+      return { alpha: currentAlpha, beta: 0 };
+    default:
+      return { alpha: currentAlpha, beta: DEFAULT_HORIZONTAL_BETA };
+  }
+};
+
+const clamp = (value: number, min: number, max: number): number => {
+  if (value < min) {
+    return min;
+  }
+  if (value > max) {
+    return max;
+  }
+  return value;
+};
+
+const normalizeAngle = (angle: number): number => {
+  const twoPi = Math.PI * 2;
+  let normalized = angle % twoPi;
+  if (normalized < 0) {
+    normalized += twoPi;
+  }
+  return normalized;
 };
 
 const colorFromHue = (hue: number): Color3 => {

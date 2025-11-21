@@ -61,9 +61,13 @@ export class PivotOrbitCamera extends ArcRotateCamera {
       const forward = rotatedTarget.subtract(rotatedPosition);
       let right = Vector3.Cross(forward, up);
       if (right.lengthSquared() < PivotOrbitCamera.EPSILON) {
-        // forward is parallel to up; pick a stable axis perpendicular to up
-        const arbitrary = Math.abs(up.y) < 0.99 ? new Vector3(0, 1, 0) : new Vector3(1, 0, 0);
-        right = Vector3.Cross(arbitrary, up);
+        // forward is parallel to up; derive a horizontal axis from the current yaw (alpha)
+        const alphaAngle = this.alpha;
+        const horizontal = new Vector3(Math.cos(alphaAngle), 0, Math.sin(alphaAngle));
+        right = Vector3.Cross(horizontal, up);
+        if (right.lengthSquared() < PivotOrbitCamera.EPSILON) {
+          right = new Vector3(1, 0, 0);
+        }
       }
       right.normalize();
       const pitchMatrix = Matrix.Identity();

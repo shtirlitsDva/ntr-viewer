@@ -1,9 +1,11 @@
 import { createBabylonRenderer, type BabylonRendererOptions } from "@viewer/viewer";
 import type {
+  CameraAngles,
   ColorMode,
   LoadOptions,
   SceneRenderer,
   SelectionListener,
+  ViewOrientation,
 } from "@viewer/engine";
 import type { SceneElement, SceneGraph } from "@viewer/sceneGraph";
 
@@ -33,6 +35,10 @@ export interface ViewerHost {
   setRotationSensitivity(value: number): void;
   getPanSensitivity(): number;
   setPanSensitivity(value: number): void;
+  getCameraAngles(): CameraAngles;
+  orientView(orientation: ViewOrientation): void;
+  setIsometricView(enabled: boolean): void;
+  isIsometricView(): boolean;
   addSelectionListener(listener: SelectionListener): () => void;
   dispose(): void;
   readonly renderer: SceneRenderer;
@@ -85,6 +91,14 @@ export const createViewerHost = (config: ViewerHostConfig): ViewerHost => {
     setPanSensitivity: (value: number) => {
       renderer.setPanSensitivity(value);
     },
+    getCameraAngles: () => renderer.getCameraAngles(),
+    orientView: (orientation: ViewOrientation) => {
+      renderer.orientView(orientation);
+    },
+    setIsometricView: (enabled: boolean) => {
+      renderer.setIsometricView(enabled);
+    },
+    isIsometricView: () => renderer.isIsometricView(),
     addSelectionListener: (listener: SelectionListener) => renderer.onSelectionChanged(listener),
     dispose() {
       detachInitialListener();
