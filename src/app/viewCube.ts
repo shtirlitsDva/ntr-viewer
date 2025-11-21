@@ -115,7 +115,7 @@ export const attachViewCube = (config: ViewCubeConfig): ViewCubeController => {
       const angles = target.getCameraAngles();
       if (angles) {
         const rotation = computeRotation(angles, lastRotation);
-        const transform = `rotateX(${rotation.rotX}deg) rotateY(${rotation.rotY}deg)`;
+        const transform = `rotateX(${rotation.rotX}deg) rotateY(${-rotation.rotY}deg)`;
         if (transform !== lastTransform) {
           cube.style.transform = transform;
           lastTransform = transform;
