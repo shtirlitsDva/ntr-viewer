@@ -17,6 +17,7 @@ export type AxisCode = "Y" | "Z";
 export type NormCode = string & { readonly __brand: "NormCode" };
 export type ScheduleCode = string & { readonly __brand: "ScheduleCode" };
 export type SeriesCode = string & { readonly __brand: "SeriesCode" };
+export type CoordinateUnit = "millimeter" | "meter";
 
 export type Millimeters = number & { readonly __brand: "Millimeters" };
 export type Degrees = number & { readonly __brand: "Degrees" };

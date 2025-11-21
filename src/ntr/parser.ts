@@ -5,6 +5,7 @@ import type {
   Element,
   NtrFile,
   NominalDiameterDefinition,
+  NtrMetadata,
   ParseIssue,
 } from "./model.ts";
 import {
@@ -23,6 +24,7 @@ import {
   asString,
   createCoordinatePoint,
   createNamedPoint,
+  type CoordinateUnit,
   type Kilograms,
   type LoadCaseCode,
   type NominalDiameterCode,
@@ -44,6 +46,7 @@ export const parseNtr = (
   const elements: Element[] = [];
   const collectedIssues: ParseIssue[] = [...issues];
   const nominalDiameters = new Map<NominalDiameterCode, NominalDiameterDefinition>();
+  let metadata: NtrMetadata = {};
 
   for (const record of records) {
     switch (record.code) {
@@ -81,7 +84,15 @@ export const parseNtr = (
         }
         break;
       }
-      case "GEN":
+      case "GEN": {
+        const result = parseGeneralRecord(record);
+        if (result.ok) {
+          metadata = { ...metadata, ...result.value };
+        } else {
+          collectedIssues.push(result.error);
+        }
+        break;
+      }
       case "AUFT":
       case "TEXT":
       case "LAST":
@@ -107,7 +118,7 @@ export const parseNtr = (
 
   const validation = validateNtrFile({
     id,
-    metadata: {},
+    metadata,
     definitions: {
       nominalDiameters: mapToRecord(nominalDiameters),
     },
@@ -591,6 +602,46 @@ const optionalMapped = <T>(
 const optionalString = (map: FieldMap, key: string): string | undefined => {
   const field = map.get(key);
   return field ? asString(field.value) : undefined;
+};
+
+const parseCoordinateUnit = (value: string): CoordinateUnit | undefined => {
+  const normalized = value.trim().toUpperCase();
+  if (normalized === "MM") {
+    return "millimeter";
+  }
+  if (normalized === "M") {
+    return "meter";
+  }
+  return undefined;
+};
+
+const parseGeneralRecord = (
+  record: RawRecord,
+): Result<Partial<NtrMetadata>, ParseIssue> => {
+  const map = createFieldMap(record);
+  const patch: Partial<NtrMetadata> = {};
+
+  const specification = optionalString(map, "CODE");
+  if (specification) {
+    patch.specification = specification;
+  }
+
+  const unitField = map.get("UNITKT");
+  if (unitField) {
+    const coordinateUnit = parseCoordinateUnit(unitField.value);
+    if (!coordinateUnit) {
+      return err(
+        createIssue(
+          record.code,
+          unitField.lineNumber,
+          `Unsupported UNITKT value "${unitField.value}" (expected M or MM)`,
+        ),
+      );
+    }
+    patch.coordinateUnit = coordinateUnit;
+  }
+
+  return ok(patch);
 };
 
 const mapToRecord = <K extends string, V>(map: Map<K, V>): Record<K, V> => {

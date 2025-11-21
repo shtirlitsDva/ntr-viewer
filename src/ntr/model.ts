@@ -1,6 +1,7 @@
 import type {
   AxisCode,
   ComponentTag,
+  CoordinateUnit,
   Identifier,
   Kilograms,
   Millimeters,
@@ -100,6 +101,7 @@ export type Element = StraightPipe | Profile | Bend | Tee | Arm | Reducer;
 export interface NtrMetadata {
   readonly projectName?: string;
   readonly specification?: string;
+  readonly coordinateUnit?: CoordinateUnit;
 }
 
 export interface NominalDiameterDefinition {

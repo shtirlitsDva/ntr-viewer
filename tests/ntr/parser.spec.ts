@@ -50,4 +50,35 @@ describe("parseNtr", () => {
     const [issue] = result.error;
     expect(issue?.message).toContain("Missing required field");
   });
+
+  it("captures coordinate units and metadata from the GEN record", () => {
+    const source = `
+GEN TMONT=10 UNITKT=M CODE=EN13941
+RO P1='0,0,0' P2='1,0,0' DN=DN100
+`.trim();
+
+    const result = parseNtr("units", source);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      expect.fail("expected parse to succeed");
+    }
+
+    expect(result.value.file.metadata.coordinateUnit).toBe("meter");
+    expect(result.value.file.metadata.specification).toBe("EN13941");
+  });
+
+  it("reports an error for unsupported UNITKT codes", () => {
+    const source = `
+GEN UNITKT=FT
+RO P1='0,0,0' P2='1,0,0' DN=DN100
+`.trim();
+
+    const result = parseNtr("bad-unit", source);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      expect.fail("expected parser to fail");
+    }
+    const [issue] = result.error;
+    expect(issue?.message).toContain("UNITKT");
+  });
 });
