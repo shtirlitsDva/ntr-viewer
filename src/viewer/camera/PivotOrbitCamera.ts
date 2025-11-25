@@ -14,6 +14,8 @@ export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly MAX_RADIUS_FOR_SENSITIVITY = 2_000;
   private static readonly PAN_FAR_MULTIPLIER = 0.2;
   private static readonly ORBIT_FAR_MULTIPLIER = 0.35;
+  private static readonly ZOOM_PERCENT_NEAR = 0.0025;
+  private static readonly ZOOM_PERCENT_FAR = 0.02;
   private overridePivot: Vector3 | null = null;
   private panSensitivityBaseline: number | null = null;
   private angularSensitivityBaseline: number | null = null;
@@ -169,6 +171,14 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     const orbitSensitivity = PivotOrbitCamera.lerp(orbitNear, orbitFar, normalizedRadius);
     pointerInput.angularSensibilityX = orbitSensitivity;
     pointerInput.angularSensibilityY = orbitSensitivity;
+
+    const zoomPercent = PivotOrbitCamera.lerp(
+      PivotOrbitCamera.ZOOM_PERCENT_NEAR,
+      PivotOrbitCamera.ZOOM_PERCENT_FAR,
+      normalizedRadius,
+    );
+    this.wheelDeltaPercentage = zoomPercent;
+    this.pinchDeltaPercentage = zoomPercent;
   }
 
   private normalizeRadius(radius: number): number {
