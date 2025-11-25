@@ -49,7 +49,7 @@ const DEFAULT_CAMERA_RADIUS = 10;
 export const DEFAULT_PIPE_DIAMETER = 50;
 const DEFAULT_MSAA_SAMPLES = 4;
 const MIN_CAMERA_RADIUS = 0.025;
-const WHEEL_ZOOM_RATE = 0.002;
+const CAMERA_RADIUS_CHANGE_EPSILON = 1e-4;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -66,7 +66,6 @@ export interface BabylonRendererOptions {
 }
 
 export class BabylonSceneRenderer implements SceneRenderer {
-  private readonly canvas: HTMLCanvasElement;
   private readonly engine: Engine;
   private readonly scene: Scene;
   private readonly camera: PivotOrbitCamera;
@@ -82,7 +81,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private readonly propertyColorCache = new Map<string, Map<string, Color3>>();
   private renderPipeline: DefaultRenderingPipeline | null = null;
   private resizeHandler: (() => void) | null = null;
-  private wheelHandler: ((event: WheelEvent) => void) | null = null;
   private currentGraph: SceneGraph | null = null;
   private selectedElement: string | null = null;
   private colorMode: ColorMode = "type";
@@ -90,10 +88,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private sceneOffset = new BabylonVector3(0, 0, 0);
   private isometricViewEnabled = false;
   private lastBoundsSpan = 1;
+  private lastCameraRadius = DEFAULT_CAMERA_RADIUS;
 
   public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
-    this.canvas = canvas;
     this.engine = new Engine(canvas, true, { preserveDrawingBuffer: false, stencil: false }, true);
     this.scene = new Scene(this.engine);
     this.scene.clearColor = new Color4(0, 0, 0, 1);
@@ -113,20 +111,19 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.lowerBetaLimit = 0;
     this.camera.upperBetaLimit = Math.PI;
     this.camera.allowUpsideDown = false;
-    this.camera.wheelDeltaPercentage = 0.01;
-    this.camera.panningSensibility = 50;
-    this.camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
+    this.camera.zoomToMouseLocation = true;
+    this.camera.pinchDeltaPercentage = 0.01;
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
     this.pointerInput = new RevitStylePointerInput();
     this.camera.inputs.add(this.pointerInput);
+    this.camera.refreshSensitivityBaselines();
+    this.lastCameraRadius = this.camera.radius;
 
     this.gridVisible = showGrid;
     this.configureRenderingPipeline(msaaSamples);
 
     const light = new HemisphericLight("hemi", new BabylonVector3(0, 1, 0), this.scene);
     light.intensity = 0.9;
-
-    this.initializeMouseWheelZoom();
 
     this.ground = MeshBuilder.CreateGround(
       "grid",
@@ -173,6 +170,15 @@ export class BabylonSceneRenderer implements SceneRenderer {
     });
 
     this.engine.runRenderLoop(() => {
+      if (this.isometricViewEnabled) {
+        const radius = this.camera.radius;
+        if (Math.abs(radius - this.lastCameraRadius) > CAMERA_RADIUS_CHANGE_EPSILON) {
+          this.lastCameraRadius = radius;
+          this.updateOrthographicFrustum();
+        }
+      } else {
+        this.lastCameraRadius = this.camera.radius;
+      }
       this.scene.render();
     });
 
@@ -191,10 +197,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
     if (this.resizeHandler) {
       window.removeEventListener("resize", this.resizeHandler);
       this.resizeHandler = null;
-    }
-    if (this.wheelHandler) {
-      this.canvas.removeEventListener("wheel", this.wheelHandler);
-      this.wheelHandler = null;
     }
     this.renderPipeline?.dispose();
     this.renderPipeline = null;
@@ -264,6 +266,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public setRotationSensitivity(value: number): void {
     this.pointerInput.setRotationSensitivity(value);
+    this.camera.refreshSensitivityBaselines();
   }
 
   public getPanSensitivity(): number {
@@ -272,6 +275,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public setPanSensitivity(value: number): void {
     this.pointerInput.setPanSensitivity(value);
+    this.camera.refreshSensitivityBaselines();
   }
 
   public getCameraAngles() {
@@ -318,8 +322,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
       this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
+      this.camera.upperRadiusLimit = null;
       this.updateCameraClipping(bounds);
       this.lastBoundsSpan = 1;
+      this.lastCameraRadius = this.camera.radius;
       this.updateOrthographicFrustum();
       return;
     }
@@ -329,8 +335,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.camera.target = BabylonVector3.Zero();
       this.camera.radius = DEFAULT_CAMERA_RADIUS;
       this.camera.lowerRadiusLimit = MIN_CAMERA_RADIUS;
+      this.camera.upperRadiusLimit = null;
       this.updateCameraClipping(bounds);
       this.lastBoundsSpan = 1;
+      this.lastCameraRadius = this.camera.radius;
       this.updateOrthographicFrustum();
       return;
     }
@@ -352,8 +360,10 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.target = center;
     this.camera.radius = radius;
     this.camera.lowerRadiusLimit = Math.max(radius * 0.01, MIN_CAMERA_RADIUS);
+    this.camera.upperRadiusLimit = Math.max(maxSpan * 10, radius * 4);
     this.camera.maxZ = farPlane;
     this.camera.minZ = Math.max(radius * 0.01, 0.05);
+    this.lastCameraRadius = radius;
     this.updateOrthographicFrustum();
   }
 
@@ -843,28 +853,6 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.elementMaterials.set(elementId, material);
     }
     return material;
-  }
-
-  private initializeMouseWheelZoom(): void {
-    const handler = (event: WheelEvent) => {
-      if (event.deltaY === 0) {
-        return;
-      }
-
-      event.preventDefault();
-      const zoomFactor = Math.exp(event.deltaY * WHEEL_ZOOM_RATE);
-      const lowerLimit = this.camera.lowerRadiusLimit ?? 0.1;
-      const upperLimit = this.camera.upperRadiusLimit ?? Number.POSITIVE_INFINITY;
-      const targetRadius = this.camera.radius * zoomFactor;
-      const clampedRadius = Math.min(Math.max(targetRadius, lowerLimit), upperLimit);
-      this.camera.radius = clampedRadius;
-      if (this.isometricViewEnabled) {
-        this.updateOrthographicFrustum();
-      }
-    };
-
-    this.canvas.addEventListener("wheel", handler, { passive: false });
-    this.wheelHandler = handler;
   }
 
   private getColorForElement(element: SceneElement): Color3 {

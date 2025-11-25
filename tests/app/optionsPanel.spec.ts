@@ -137,10 +137,12 @@ describe("createOptionsPanelController", () => {
 
     rotationInput.value = "2.5";
     rotationInput.dispatchEvent(new Event("change"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(viewerHost?.setRotationSensitivity).toHaveBeenCalledWith(2.5);
 
     panInput.value = "3.1";
     panInput.dispatchEvent(new Event("blur"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(viewerHost?.setPanSensitivity).toHaveBeenCalledWith(3.1);
 
     controller.hide();
