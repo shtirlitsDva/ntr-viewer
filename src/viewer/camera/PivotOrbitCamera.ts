@@ -21,6 +21,7 @@ export class PivotOrbitCamera extends ArcRotateCamera {
   private overridePivot: Vector3 | null = null;
   private panSensitivityBaseline: number | null = null;
   private angularSensitivityBaseline: number | null = null;
+  private zoomSpeedMultiplier = 1;
 
   public constructor(
     name: string,
@@ -150,6 +151,18 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     super._checkInputs();
   }
 
+  public setZoomSpeedMultiplier(multiplier: number): void {
+    const clamped = Math.min(Math.max(multiplier, 0.01), 5);
+    if (Math.abs(clamped - this.zoomSpeedMultiplier) < PivotOrbitCamera.EPSILON) {
+      return;
+    }
+    this.zoomSpeedMultiplier = clamped;
+  }
+
+  public getZoomSpeedMultiplier(): number {
+    return this.zoomSpeedMultiplier;
+  }
+
   private updateDynamicSensitivities(): void {
     const pointerInput = this.getPointerInput();
     if (!pointerInput) {
@@ -178,7 +191,7 @@ export class PivotOrbitCamera extends ArcRotateCamera {
       PivotOrbitCamera.ZOOM_PERCENT_NEAR,
       PivotOrbitCamera.ZOOM_PERCENT_FAR,
       normalizedRadius,
-    );
+    ) * this.zoomSpeedMultiplier;
     this.wheelDeltaPercentage = zoomPercent;
     this.pinchDeltaPercentage = zoomPercent;
 

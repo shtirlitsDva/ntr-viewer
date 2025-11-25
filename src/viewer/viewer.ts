@@ -52,6 +52,7 @@ const MIN_CAMERA_RADIUS = 0.025;
 const CAMERA_RADIUS_CHANGE_EPSILON = 1e-4;
 const MIN_NEAR_PLANE = 0.02;
 const NEAR_PLANE_RADIUS_RATIO = 0.002;
+const DEFAULT_SPEED = 50;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -91,6 +92,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
   private isometricViewEnabled = false;
   private lastBoundsSpan = 1;
   private lastCameraRadius = DEFAULT_CAMERA_RADIUS;
+  private zoomSpeed = DEFAULT_SPEED;
+  private panSpeed = DEFAULT_SPEED;
 
   public constructor(canvas: HTMLCanvasElement, options: BabylonRendererOptions = {}) {
     const { showGrid = true, msaaSamples = DEFAULT_MSAA_SAMPLES } = options;
@@ -118,6 +121,8 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.inputs.removeByType("ArcRotateCameraPointersInput");
     this.pointerInput = new RevitStylePointerInput();
     this.camera.inputs.add(this.pointerInput);
+    this.setZoomSpeed(this.zoomSpeed);
+    this.setPanSpeed(this.panSpeed);
     this.camera.refreshSensitivityBaselines();
     this.lastCameraRadius = this.camera.radius;
     this.updateNearPlaneForRadius();
@@ -280,6 +285,35 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   public setPanSensitivity(value: number): void {
     this.pointerInput.setPanSensitivity(value);
+    this.camera.refreshSensitivityBaselines();
+  }
+
+  public getZoomSpeed(): number {
+    return this.zoomSpeed;
+  }
+
+  public setZoomSpeed(value: number): void {
+    const clamped = clampSpeed(value);
+    if (clamped === this.zoomSpeed) {
+      return;
+    }
+    this.zoomSpeed = clamped;
+    const multiplier = speedToMultiplier(clamped);
+    this.camera.setZoomSpeedMultiplier(multiplier);
+  }
+
+  public getPanSpeed(): number {
+    return this.panSpeed;
+  }
+
+  public setPanSpeed(value: number): void {
+    const clamped = clampSpeed(value);
+    if (clamped === this.panSpeed) {
+      return;
+    }
+    this.panSpeed = clamped;
+    const multiplier = speedToMultiplier(clamped);
+    this.pointerInput.setPanSensitivity(multiplier);
     this.camera.refreshSensitivityBaselines();
   }
 
@@ -1079,6 +1113,19 @@ const getOrientationAngles = (orientation: ViewOrientation, currentAlpha: number
     default:
       return { alpha: currentAlpha, beta: DEFAULT_HORIZONTAL_BETA };
   }
+};
+
+const clampSpeed = (value: number): number => {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_SPEED;
+  }
+  const rounded = Math.round(value);
+  return Math.min(100, Math.max(1, rounded));
+};
+
+const speedToMultiplier = (speed: number): number => {
+  const normalized = clampSpeed(speed) / DEFAULT_SPEED;
+  return Math.pow(normalized, 1.5);
 };
 
 const clamp = (value: number, min: number, max: number): number => {
