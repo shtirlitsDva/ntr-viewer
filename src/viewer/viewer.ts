@@ -50,6 +50,8 @@ export const DEFAULT_PIPE_DIAMETER = 50;
 const DEFAULT_MSAA_SAMPLES = 4;
 const MIN_CAMERA_RADIUS = 0.025;
 const CAMERA_RADIUS_CHANGE_EPSILON = 1e-4;
+const MIN_NEAR_PLANE = 0.02;
+const NEAR_PLANE_RADIUS_RATIO = 0.002;
 interface MeshMetadata {
   elementId?: string;
 }
@@ -118,6 +120,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.inputs.add(this.pointerInput);
     this.camera.refreshSensitivityBaselines();
     this.lastCameraRadius = this.camera.radius;
+    this.updateNearPlaneForRadius();
 
     this.gridVisible = showGrid;
     this.configureRenderingPipeline(msaaSamples);
@@ -170,14 +173,15 @@ export class BabylonSceneRenderer implements SceneRenderer {
     });
 
     this.engine.runRenderLoop(() => {
-      if (this.isometricViewEnabled) {
-        const radius = this.camera.radius;
-        if (Math.abs(radius - this.lastCameraRadius) > CAMERA_RADIUS_CHANGE_EPSILON) {
-          this.lastCameraRadius = radius;
+      const radius = this.camera.radius;
+      if (Math.abs(radius - this.lastCameraRadius) > CAMERA_RADIUS_CHANGE_EPSILON) {
+        this.lastCameraRadius = radius;
+        this.updateNearPlaneForRadius();
+        if (this.isometricViewEnabled) {
           this.updateOrthographicFrustum();
         }
-      } else {
-        this.lastCameraRadius = this.camera.radius;
+      } else if (this.isometricViewEnabled) {
+        this.updateOrthographicFrustum();
       }
       this.scene.render();
     });
@@ -224,6 +228,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.applySelectionColors();
     this.updateGround(graph.bounds);
     this.updateCameraClipping(graph.bounds);
+    this.updateNearPlaneForRadius();
     if (!options.maintainCamera) {
       this.fitToBounds(graph.bounds);
     }
@@ -326,6 +331,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.updateCameraClipping(bounds);
       this.lastBoundsSpan = 1;
       this.lastCameraRadius = this.camera.radius;
+      this.updateNearPlaneForRadius();
       this.updateOrthographicFrustum();
       return;
     }
@@ -339,6 +345,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
       this.updateCameraClipping(bounds);
       this.lastBoundsSpan = 1;
       this.lastCameraRadius = this.camera.radius;
+      this.updateNearPlaneForRadius();
       this.updateOrthographicFrustum();
       return;
     }
@@ -359,11 +366,11 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
     this.camera.target = center;
     this.camera.radius = radius;
-    this.camera.lowerRadiusLimit = Math.max(radius * 0.01, MIN_CAMERA_RADIUS);
+    this.camera.lowerRadiusLimit = Math.max(maxSpan * 0.0005, MIN_CAMERA_RADIUS);
     this.camera.upperRadiusLimit = Math.max(maxSpan * 10, radius * 4);
     this.camera.maxZ = farPlane;
-    this.camera.minZ = Math.max(radius * 0.01, 0.05);
     this.lastCameraRadius = radius;
+    this.updateNearPlaneForRadius();
     this.updateOrthographicFrustum();
   }
 
@@ -945,14 +952,12 @@ export class BabylonSceneRenderer implements SceneRenderer {
 
   private updateCameraClipping(bounds: SceneGraph["bounds"]): void {
     if (!bounds) {
-      this.camera.minZ = 0.1;
       this.camera.maxZ = 10_000;
       return;
     }
 
     const adjusted = this.adjustBounds(bounds);
     if (!adjusted) {
-      this.camera.minZ = 0.1;
       this.camera.maxZ = 10_000;
       return;
     }
@@ -961,9 +966,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const spanY = Math.max(adjusted.max.y - adjusted.min.y, 0.0001);
     const spanZ = Math.max(adjusted.max.z - adjusted.min.z, 0.0001);
     const maxSpan = Math.max(spanX, spanY, spanZ);
-    const near = Math.max(maxSpan * 0.005, 0.05);
-    const far = Math.max(maxSpan * 10, near * 50);
-    this.camera.minZ = near;
+    const far = Math.max(maxSpan * 10, this.camera.minZ * 200);
     this.camera.maxZ = far;
   }
 
@@ -997,6 +1000,21 @@ export class BabylonSceneRenderer implements SceneRenderer {
     const verticalHalf = radius / aspect;
     this.camera.orthoTop = verticalHalf;
     this.camera.orthoBottom = -verticalHalf;
+  }
+
+  private updateNearPlaneForRadius(): void {
+    const radius = Math.max(this.camera.radius, MIN_CAMERA_RADIUS);
+    const span = Math.max(this.lastBoundsSpan, 1);
+    const near = clamp(
+      radius * NEAR_PLANE_RADIUS_RATIO,
+      MIN_NEAR_PLANE,
+      Math.max(span * 0.25, MIN_NEAR_PLANE),
+    );
+
+    this.camera.minZ = near;
+    if (this.camera.maxZ <= near) {
+      this.camera.maxZ = near * 10;
+    }
   }
 
   private applyIsometricOrientation(): void {
