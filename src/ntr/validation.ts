@@ -154,6 +154,7 @@ const elementBaseSchema = z
     norm: normSchema.optional(),
     series: seriesSchema.optional(),
     schedule: scheduleSchema.optional(),
+    lineNumber: z.number().int().min(1),
   })
   .strict();
 
