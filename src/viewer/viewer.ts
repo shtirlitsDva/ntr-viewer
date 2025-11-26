@@ -314,7 +314,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.panSpeed = clamped;
     const multiplier = speedToMultiplier(clamped);
     this.pointerInput.setPanSensitivity(multiplier);
-    this.camera.refreshSensitivityBaselines();
+    this.camera.setPanSensitivityBaseline(this.pointerInput.panningSensibility);
   }
 
   public getCameraAngles() {
