@@ -1,4 +1,5 @@
 import { PointerEventTypes } from "@babylonjs/core/Events/pointerEvents";
+import type { IMouseEvent } from "@babylonjs/core/Events/deviceInputEvents";
 import { Engine } from "@babylonjs/core/Engines/engine";
 import { Camera } from "@babylonjs/core/Cameras/camera";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
@@ -1059,7 +1060,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.beta = ISO_BETA;
   }
 
-  private pickAtPointer(event: PointerEvent) {
+  private pickAtPointer(event: PointerEvent | IMouseEvent) {
     const rect = this.engine.getInputElement()?.getBoundingClientRect();
     if (rect) {
       const x = event.clientX - rect.left;
