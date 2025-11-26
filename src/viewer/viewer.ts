@@ -156,7 +156,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
         return;
       }
 
-      const pickResult = pointerInfo.pickInfo;
+      const pickResult = this.pickAtPointer(event);
       if (import.meta.env.DEV) {
         console.debug(
           "[viewer] pointer down",
@@ -1057,6 +1057,17 @@ export class BabylonSceneRenderer implements SceneRenderer {
     this.camera.inertialRadiusOffset = 0;
     this.camera.alpha = ISO_ALPHA;
     this.camera.beta = ISO_BETA;
+  }
+
+  private pickAtPointer(event: PointerEvent) {
+    const rect = this.engine.getInputElement()?.getBoundingClientRect();
+    if (rect) {
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      this.scene.pointerX = x;
+      this.scene.pointerY = y;
+    }
+    return this.scene.pick(this.scene.pointerX, this.scene.pointerY);
   }
 }
 
