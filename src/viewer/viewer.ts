@@ -313,8 +313,7 @@ export class BabylonSceneRenderer implements SceneRenderer {
     }
     this.panSpeed = clamped;
     const multiplier = speedToMultiplier(clamped);
-    // Pan sensitivity is inverse: larger sensibility number = slower pan.
-    this.pointerInput.setPanSensitivity(1 / multiplier);
+    this.pointerInput.setPanSensitivity(multiplier);
     this.camera.refreshSensitivityBaselines();
   }
 

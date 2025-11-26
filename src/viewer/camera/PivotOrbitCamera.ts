@@ -14,6 +14,7 @@ export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly MAX_RADIUS_FOR_SENSITIVITY = 2_000;
   private static readonly PAN_FAR_MULTIPLIER = 0.2;
   private static readonly ORBIT_FAR_MULTIPLIER = 0.35;
+  private static readonly ORBIT_DAMPING = 1.5;
   private static readonly ZOOM_PERCENT_NEAR = 0.0015;
   private static readonly ZOOM_PERCENT_FAR = 0.02;
   private static readonly INERTIA_NEAR = 0.65;
@@ -181,8 +182,9 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     const panFar = this.panSensitivityBaseline * PivotOrbitCamera.PAN_FAR_MULTIPLIER;
     pointerInput.panningSensibility = PivotOrbitCamera.lerp(panNear, panFar, normalizedRadius);
 
-    const orbitNear = this.angularSensitivityBaseline;
-    const orbitFar = this.angularSensitivityBaseline * PivotOrbitCamera.ORBIT_FAR_MULTIPLIER;
+    const orbitNear = this.angularSensitivityBaseline * PivotOrbitCamera.ORBIT_DAMPING;
+    const orbitFar =
+      this.angularSensitivityBaseline * PivotOrbitCamera.ORBIT_FAR_MULTIPLIER * PivotOrbitCamera.ORBIT_DAMPING;
     const orbitSensitivity = PivotOrbitCamera.lerp(orbitNear, orbitFar, normalizedRadius);
     pointerInput.angularSensibilityX = orbitSensitivity;
     pointerInput.angularSensibilityY = orbitSensitivity;
