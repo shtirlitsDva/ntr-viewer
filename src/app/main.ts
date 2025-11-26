@@ -30,6 +30,12 @@ import {
   readViewerSettings,
   type OptionsPanelController,
 } from "./optionsPanel.ts";
+import {
+  createSpeedStripController,
+  DEFAULT_SPEED_SETTINGS,
+  readSpeedSettings,
+  type SpeedStripController,
+} from "./speedStrip.ts";
 import { createToastManager, type ToastManager } from "./toastManager.ts";
 import { initializeTelemetryToggle } from "./telemetryPreferences.ts";
 import { createViewerHost, type ViewerHost } from "./viewerHost.ts";
@@ -73,9 +79,13 @@ let panSensitivityInput: HTMLInputElement;
 let manualPathForm: HTMLFormElement;
 let manualPathInput: HTMLInputElement;
 let viewerContainer: HTMLElement;
+let speedStrip: HTMLElement;
+let zoomSpeedInput: HTMLInputElement;
+let panSpeedInput: HTMLInputElement;
 let currentColorMode: ColorMode = "type";
 const LAST_FILE_STORAGE_KEY = "ntr-viewer:last-file-path";
 const SETTINGS_STORAGE_KEY = "ntr-viewer:options";
+const SPEED_STORAGE_KEY = "ntr-viewer:speeds";
 
 type LoadSource = "manual" | "restore" | "watch";
 
@@ -84,6 +94,7 @@ let fileDropManager: FileDropManager | null = null;
 let toolbarController: ToolbarController | null = null;
 let keyboardController: KeyboardShortcutController | null = null;
 let optionsPanelController: OptionsPanelController | null = null;
+let speedStripController: SpeedStripController | null = null;
 let toastManager: ToastManager | null = null;
 let viewCubeController: ViewCubeController | null = null;
 
@@ -258,6 +269,9 @@ const initialize = async () => {
   manualPathForm = queryElement<HTMLFormElement>('[data-action="manual-path-form"]');
   manualPathInput = queryElement<HTMLInputElement>('[data-control="manual-path"]');
   viewerContainer = queryElement<HTMLElement>(".viewer-container");
+  speedStrip = queryElement<HTMLElement>('[data-control="speed-strip"]');
+  zoomSpeedInput = queryElement<HTMLInputElement>('[data-control="zoom-speed"]');
+  panSpeedInput = queryElement<HTMLInputElement>('[data-control="pan-speed"]');
   const openFileButton = queryElement<HTMLButtonElement>('[data-action="open-file"]');
   const fitViewButton = queryElement<HTMLButtonElement>('[data-action="fit-view"]');
   const resetViewButton = queryElement<HTMLButtonElement>('[data-action="reset-view"]');
@@ -274,6 +288,9 @@ const initialize = async () => {
   const persistedSettings = readViewerSettings(SETTINGS_STORAGE_KEY, DEFAULT_SETTINGS);
   viewerHost.setRotationSensitivity(persistedSettings.rotationSensitivity);
   viewerHost.setPanSensitivity(persistedSettings.panSensitivity);
+  const persistedSpeeds = readSpeedSettings(SPEED_STORAGE_KEY, DEFAULT_SPEED_SETTINGS);
+  viewerHost.setZoomSpeed(persistedSpeeds.zoomSpeed);
+  viewerHost.setPanSpeed(persistedSpeeds.panSpeed);
   viewerHost.setIsometricView(isoToggle.checked);
   updateColorModeOptions([]);
   viewCubeController?.dispose();
@@ -354,6 +371,15 @@ const initialize = async () => {
     },
   });
   optionsPanelController.refresh();
+  speedStripController?.dispose();
+  speedStripController = createSpeedStripController({
+    container: speedStrip,
+    zoomInput: zoomSpeedInput,
+    panInput: panSpeedInput,
+    storageKey: SPEED_STORAGE_KEY,
+    getViewerHost: () => viewerHost,
+  });
+  speedStripController.refresh();
   toastManager?.dispose();
   toastManager = createToastManager({ container: toastContainer });
   initializeTelemetryToggle(telemetryToggle);

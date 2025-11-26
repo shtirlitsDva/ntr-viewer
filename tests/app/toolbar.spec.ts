@@ -39,10 +39,12 @@ describe("attachToolbar", () => {
 
     elements.isoToggle.checked = true;
     elements.isoToggle.dispatchEvent(new Event("change"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(callbacks.onIsoToggle).toHaveBeenCalledWith(true);
 
     elements.isoToggle.checked = false;
     elements.isoToggle.dispatchEvent(new Event("change"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(callbacks.onIsoToggle).toHaveBeenCalledWith(false);
 
     controller.dispose();

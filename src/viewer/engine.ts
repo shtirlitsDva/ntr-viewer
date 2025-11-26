@@ -34,6 +34,10 @@ export interface SceneRenderer {
   setRotationSensitivity(value: number): void;
   getPanSensitivity(): number;
   setPanSensitivity(value: number): void;
+  getPanSpeed(): number;
+  setPanSpeed(value: number): void;
+  getZoomSpeed(): number;
+  setZoomSpeed(value: number): void;
   getCameraAngles(): CameraAngles;
   setIsometricView(enabled: boolean): void;
   isIsometricView(): boolean;

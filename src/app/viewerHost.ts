@@ -35,6 +35,10 @@ export interface ViewerHost {
   setRotationSensitivity(value: number): void;
   getPanSensitivity(): number;
   setPanSensitivity(value: number): void;
+  getPanSpeed(): number;
+  setPanSpeed(value: number): void;
+  getZoomSpeed(): number;
+  setZoomSpeed(value: number): void;
   getCameraAngles(): CameraAngles;
   orientView(orientation: ViewOrientation): void;
   setIsometricView(enabled: boolean): void;
@@ -90,6 +94,18 @@ export const createViewerHost = (config: ViewerHostConfig): ViewerHost => {
     },
     setPanSensitivity: (value: number) => {
       renderer.setPanSensitivity(value);
+    },
+    getPanSpeed() {
+      return renderer.getPanSpeed();
+    },
+    setPanSpeed: (value: number) => {
+      renderer.setPanSpeed(value);
+    },
+    getZoomSpeed() {
+      return renderer.getZoomSpeed();
+    },
+    setZoomSpeed: (value: number) => {
+      renderer.setZoomSpeed(value);
     },
     getCameraAngles: () => renderer.getCameraAngles(),
     orientView: (orientation: ViewOrientation) => {

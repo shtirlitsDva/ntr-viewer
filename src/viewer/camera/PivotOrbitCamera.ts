@@ -1,5 +1,7 @@
 import { ArcRotateCamera } from "@babylonjs/core/Cameras/arcRotateCamera";
+import { ArcRotateCameraPointersInput } from "@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput";
 import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
+import type { Scene } from "@babylonjs/core/scene";
 
 /**
  * ArcRotateCamera extension that keeps track of an override pivot when rotating.
@@ -8,7 +10,36 @@ import { Matrix, Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
  */
 export class PivotOrbitCamera extends ArcRotateCamera {
   private static readonly EPSILON = 1e-6;
+  private static readonly MIN_RADIUS_FOR_SENSITIVITY = 2;
+  private static readonly MAX_RADIUS_FOR_SENSITIVITY = 2_000;
+  private static readonly PAN_FAR_MULTIPLIER = 0.2;
+  private static readonly ORBIT_FAR_MULTIPLIER = 0.35;
+  private static readonly ORBIT_DAMPING = 1;
+  private static readonly ZOOM_PERCENT_NEAR = 0.0015;
+  private static readonly ZOOM_PERCENT_FAR = 0.02;
+  private static readonly INERTIA_NEAR = 0.65;
+  private static readonly INERTIA_FAR = 0.9;
   private overridePivot: Vector3 | null = null;
+  private panSensitivityBaseline: number | null = null;
+  private angularSensitivityBaseline: number | null = null;
+  private zoomSpeedMultiplier = 1;
+
+  public constructor(
+    name: string,
+    alpha: number,
+    beta: number,
+    radius: number,
+    target: Vector3,
+    scene?: Scene,
+    setActiveOnSceneIfNoneActive?: boolean,
+  ) {
+    super(name, alpha, beta, radius, target, scene, setActiveOnSceneIfNoneActive);
+
+    this.wheelDeltaPercentage = 0.01;
+    this.pinchDeltaPercentage = 0.01;
+    this.zoomToMouseLocation = true;
+    this.enforceBetaLimits();
+  }
 
   public getActivePivot(): Vector3 {
     return this.overridePivot ?? this.target;
@@ -104,5 +135,104 @@ export class PivotOrbitCamera extends ArcRotateCamera {
     if (this.upperBetaLimit === null || this.upperBetaLimit === undefined) {
       this.upperBetaLimit = Math.PI - defaultPadding;
     }
+  }
+
+  public refreshSensitivityBaselines(): void {
+    const pointerInput = this.getPointerInput();
+    if (!pointerInput) {
+      return;
+    }
+    this.panSensitivityBaseline = pointerInput.panningSensibility;
+    // Keep both axes aligned; average in case a future input tweaks them independently.
+    this.angularSensitivityBaseline = (pointerInput.angularSensibilityX + pointerInput.angularSensibilityY) * 0.5;
+  }
+
+  public override _checkInputs(): void {
+    this.updateDynamicSensitivities();
+    super._checkInputs();
+  }
+
+  public setZoomSpeedMultiplier(multiplier: number): void {
+    const clamped = Math.min(Math.max(multiplier, 0.01), 5);
+    if (Math.abs(clamped - this.zoomSpeedMultiplier) < PivotOrbitCamera.EPSILON) {
+      return;
+    }
+    this.zoomSpeedMultiplier = clamped;
+  }
+
+  public getZoomSpeedMultiplier(): number {
+    return this.zoomSpeedMultiplier;
+  }
+
+  public setPanSensitivityBaseline(value: number): void {
+    if (!Number.isFinite(value) || value <= 0) {
+      return;
+    }
+    this.panSensitivityBaseline = value;
+  }
+
+  private updateDynamicSensitivities(): void {
+    const pointerInput = this.getPointerInput();
+    if (!pointerInput) {
+      return;
+    }
+
+    if (this.panSensitivityBaseline === null || this.angularSensitivityBaseline === null) {
+      this.refreshSensitivityBaselines();
+      if (this.panSensitivityBaseline === null || this.angularSensitivityBaseline === null) {
+        return;
+      }
+    }
+
+    const normalizedRadius = this.normalizeRadius(this.radius);
+    const panNear = this.panSensitivityBaseline;
+    const panFar = this.panSensitivityBaseline * PivotOrbitCamera.PAN_FAR_MULTIPLIER;
+    pointerInput.panningSensibility = PivotOrbitCamera.lerp(panNear, panFar, normalizedRadius);
+
+    const orbitNear = this.angularSensitivityBaseline * PivotOrbitCamera.ORBIT_DAMPING;
+    const orbitFar =
+      this.angularSensitivityBaseline * PivotOrbitCamera.ORBIT_FAR_MULTIPLIER * PivotOrbitCamera.ORBIT_DAMPING;
+    const orbitSensitivity = PivotOrbitCamera.lerp(orbitNear, orbitFar, normalizedRadius);
+    pointerInput.angularSensibilityX = orbitSensitivity;
+    pointerInput.angularSensibilityY = orbitSensitivity;
+
+    const zoomPercent = PivotOrbitCamera.lerp(
+      PivotOrbitCamera.ZOOM_PERCENT_NEAR,
+      PivotOrbitCamera.ZOOM_PERCENT_FAR,
+      normalizedRadius,
+    ) * this.zoomSpeedMultiplier;
+    this.wheelDeltaPercentage = zoomPercent;
+    this.pinchDeltaPercentage = zoomPercent;
+
+    this.inertia = PivotOrbitCamera.lerp(
+      PivotOrbitCamera.INERTIA_NEAR,
+      PivotOrbitCamera.INERTIA_FAR,
+      normalizedRadius,
+    );
+  }
+
+  private normalizeRadius(radius: number): number {
+    const min = PivotOrbitCamera.MIN_RADIUS_FOR_SENSITIVITY;
+    const max = PivotOrbitCamera.MAX_RADIUS_FOR_SENSITIVITY;
+    if (radius <= min) {
+      return 0;
+    }
+    if (radius >= max) {
+      return 1;
+    }
+    return (radius - min) / (max - min);
+  }
+
+  private getPointerInput(): ArcRotateCameraPointersInput | null {
+    const pointerInput = this.inputs.attached["pointers"];
+    if (pointerInput instanceof ArcRotateCameraPointersInput) {
+      return pointerInput;
+    }
+    return null;
+  }
+
+  private static lerp(a: number, b: number, t: number): number {
+    const clamped = Math.min(Math.max(t, 0), 1);
+    return a + (b - a) * clamped;
   }
 }

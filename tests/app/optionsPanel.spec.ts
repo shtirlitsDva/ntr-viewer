@@ -41,6 +41,10 @@ const createViewerHostStub = (): ViewerHost => {
     setRotationSensitivity,
     getPanSensitivity: () => panValue,
     setPanSensitivity,
+    getPanSpeed: () => 50,
+    setPanSpeed: vi.fn(),
+    getZoomSpeed: () => 50,
+    setZoomSpeed: vi.fn(),
     getCameraAngles: () => ({ alpha: 0, beta: Math.PI / 2 }),
     setIsometricView: vi.fn(),
     isIsometricView: vi.fn(() => false),
@@ -59,6 +63,10 @@ const createViewerHostStub = (): ViewerHost => {
     setRotationSensitivity,
     getPanSensitivity: () => panValue,
     setPanSensitivity,
+    getPanSpeed: () => 50,
+    setPanSpeed: vi.fn(),
+    getZoomSpeed: () => 50,
+    setZoomSpeed: vi.fn(),
     getCameraAngles: () => ({ alpha: 0, beta: Math.PI / 2 }),
     setIsometricView: vi.fn(),
     isIsometricView: () => false,
@@ -137,10 +145,12 @@ describe("createOptionsPanelController", () => {
 
     rotationInput.value = "2.5";
     rotationInput.dispatchEvent(new Event("change"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(viewerHost?.setRotationSensitivity).toHaveBeenCalledWith(2.5);
 
     panInput.value = "3.1";
     panInput.dispatchEvent(new Event("blur"));
+    // eslint-disable-next-line @typescript-eslint/unbound-method
     expect(viewerHost?.setPanSensitivity).toHaveBeenCalledWith(3.1);
 
     controller.hide();

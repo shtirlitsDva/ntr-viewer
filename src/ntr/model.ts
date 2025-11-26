@@ -38,6 +38,7 @@ export interface ElementBase {
   readonly norm?: NormCode;
   readonly series?: SeriesCode;
   readonly schedule?: ScheduleCode;
+  readonly lineNumber: number;
   readonly rawFields: Record<string, string>;
 }
 

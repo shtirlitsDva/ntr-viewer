@@ -127,9 +127,32 @@ export const parseNtr = (
   });
 
   if (!validation.ok) {
-    const validationIssues = validation.error.issues.map((issue) =>
-      createIssue("VALIDATION", 0, issue.message),
-    );
+    const validationIssues: ParseIssue[] = [];
+    for (const issue of validation.error.issues) {
+      let lineNumber = 0;
+      let recordCode = "VALIDATION";
+
+      // Try to find the element index in the path to get the line number
+      if (issue.path[0] === "elements" && typeof issue.path[1] === "number") {
+        const elementIndex = issue.path[1];
+        const element = elements[elementIndex];
+        if (element) {
+          lineNumber = element.lineNumber;
+          recordCode = element.kind;
+        }
+      }
+
+      // Format the message to be more descriptive
+      const fieldPath = issue.path.slice(2).join(".");
+      const token = FIELD_TO_TOKEN_MAP[fieldPath];
+      const fieldLabel = token ? `${token} (${fieldPath})` : fieldPath;
+
+      const message = fieldLabel
+        ? `${fieldLabel}: ${issue.message}`
+        : issue.message;
+
+      validationIssues.push(createIssue(recordCode, lineNumber, message));
+    }
     return err([...collectedIssues, ...validationIssues]);
   }
 
@@ -137,6 +160,26 @@ export const parseNtr = (
     file: validation.value,
     issues: collectedIssues,
   });
+};
+
+const FIELD_TO_TOKEN_MAP: Record<string, string> = {
+  pipeline: "LTG",
+  componentTag: "BTK",
+  reference: "REF",
+  norm: "NORM",
+  series: "SERIES",
+  schedule: "SCHED",
+  description: "TEXT",
+  material: "MAT",
+  nominalDiameter: "DN",
+  mainNominalDiameter: "DNH",
+  branchNominalDiameter: "DNA",
+  inletDiameter: "DN1",
+  outletDiameter: "DN2",
+  profileType: "TYP",
+  teeType: "TYP",
+  axis: "ACHSE",
+  weight: "GEW",
 };
 
 const parseElementRecord = (record: RawRecord): Result<Element, ParseIssue> => {
@@ -207,6 +250,7 @@ const parseStraightPipe = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "RO",
+    lineNumber: record.lineNumber,
     rawFields,
     start: startResult.value,
     end: endResult.value,
@@ -238,6 +282,7 @@ const parseBend = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "BOG",
+    lineNumber: record.lineNumber,
     rawFields,
     start: startResult.value,
     end: endResult.value,
@@ -274,6 +319,7 @@ const parseTee = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "TEE",
+    lineNumber: record.lineNumber,
     rawFields,
     mainStart: mainStart.value,
     mainEnd: mainEnd.value,
@@ -314,6 +360,7 @@ const parseArm = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "ARM",
+    lineNumber: record.lineNumber,
     rawFields,
     start: start.value,
     end: end.value,
@@ -348,6 +395,7 @@ const parseProfile = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "PROF",
+    lineNumber: record.lineNumber,
     rawFields,
     start: start.value,
     end: end.value,
@@ -379,6 +427,7 @@ const parseReducer = (record: RawRecord): Result<Element, ParseIssue> => {
 
   return ok({
     kind: "RED",
+    lineNumber: record.lineNumber,
     rawFields,
     start: start.value,
     end: end.value,
@@ -619,7 +668,7 @@ const parseGeneralRecord = (
   record: RawRecord,
 ): Result<Partial<NtrMetadata>, ParseIssue> => {
   const map = createFieldMap(record);
-  const patch: Partial<NtrMetadata> = {};
+  const patch: { -readonly [P in keyof NtrMetadata]?: NtrMetadata[P] } = {};
 
   const specification = optionalString(map, "CODE");
   if (specification) {

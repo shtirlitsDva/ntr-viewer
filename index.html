@@ -62,6 +62,18 @@
       </header>
       <div class="app-content">
         <div class="viewer-container">
+          <div class="speed-strip" data-control="speed-strip">
+            <div class="speed-strip-inner">
+              <label class="speed-field">
+                <span>Zoom</span>
+                <input type="range" min="1" max="100" step="1" value="50" data-control="zoom-speed" />
+              </label>
+              <label class="speed-field">
+                <span>Pan</span>
+                <input type="range" min="1" max="100" step="1" value="50" data-control="pan-speed" />
+              </label>
+            </div>
+          </div>
           <canvas id="viewer-canvas" class="viewer-canvas"></canvas>
         </div>
         <aside class="side-panel">
